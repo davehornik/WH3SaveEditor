@@ -42,6 +42,39 @@ This app is **not code-signed** (certificates cost money), so Windows SmartScree
 - **[RPFM](https://github.com/Frodo45127/rpfm)** by Frodo45127 — reference implementation of the ESF format
 - Thanks to the Total War modding community for keeping the format knowledge alive
 
+  
+# Roadmap
+
+Plans and ideas for future versions. No promises, no dates — this is a hobby project. 🙂
+Have a feature request? Open an issue!
+
+## Next up (v1.1)
+
+- [ ] **Territory & cities** — regions, provinces, buildings and garrisons: view & edit owners, building slots, construction progress
+- [ ] **Save doctor** — structural validation of a save (detects truncated/corrupted files and says exactly where), plus diagnostics for the most common "corrupted save" causes: missing mods and game version mismatch (both are stored in the save header)
+- [ ] **Patch guard** — warn when a save comes from a newer game version than the editor was tested on
+
+## Planned
+
+- [ ] **Readable names** — resolve character/faction/unit localisation keys (`names_name_123…`) to real in-game names from the game's data packs
+- [ ] **Character respec** — reset spent skills and refund skill points
+- [ ] **Save diff** — compare two saves and show what changed (also useful for repairing a broken save from a healthy autosave)
+- [ ] **Search in RAW tree** — find nodes and values in the full save structure
+- [ ] **Warhammer-themed UI** — custom artwork, proper skin instead of the plain dark theme
+
+## Ideas / maybe someday
+
+- [ ] Editing of array values and coordinates (e.g. teleporting armies)
+- [ ] Diplomacy extras: reputation/treachery cleanup, war coordination targets
+- [ ] More UI languages (translations are simple JSON files — contributions welcome)
+- [ ] Code-signed releases (no more SmartScreen warning)
+- [ ] Publishing the full source code
+
+## Done
+
+- [x] **v1.0** — first public release: faction treasuries, characters (rank / XP / skill points), units (strength / rank / experience), diplomacy (relations & treaties, experimental vassals), save renaming, mod list with Workshop links, RAW tree editor, EN/CZ interface, verified in game on WH3 8.1.x (singleplayer & multiplayer saves)
+
+  
 ## Legal
 
 Unofficial fan tool, not endorsed by SEGA, Creative Assembly or Games Workshop. *Total War: WARHAMMER* is their property. Use at your own risk — always back up your saves.
