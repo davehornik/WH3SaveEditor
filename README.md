@@ -6,14 +6,17 @@ A savegame editor for **Total War: WARHAMMER III** — supports both **singlepla
 ## Features
 
 - Opens, edits and re-saves WH3 campaign saves (ESF `0xABCB` format with LZMA-compressed campaign data)
+- **Multiplayer → Singleplayer conversion** — continue any co-op campaign solo! Pick your co-op save, choose which player to continue as, and the tool creates a regular singleplayer save: your faction stays playable, your partners' factions are handed to the AI, the campaign world stays untouched. Works with 2+ player campaigns, older-patch saves, and both host and client copies — no mod required, nothing installed into the game
+- **Readable names everywhere** — characters, factions, units and settlements show their real in-game names (resolved from your game's localisation packs), not `wh3_dlc27_nor_sayl` keys
 - **Overview** — rename your save, see campaign, game version, mod list with Steam Workshop links, and edit player treasuries in one click
 - **Factions** — all factions with editable treasury
 - **Characters** — lords & heroes including the recruitment pool: rank, XP and unspent skill points (all editable), with role detection (army / hero / caravan / garrison / recruit pool)
-- **Units** — every unit of every army: strength, max size, rank, experience (editable), grouped and filterable by army
+- **Units** — every unit of every army: strength, max size, rank, experience (editable), grouped and filterable by army — plus one-click **Heal army**, **Max rank army** and **Remove unit**
 - **Diplomacy** — relations between any two factions: war / peace / alliances via a color-coded picker, treaties (non-aggression pact, trade rights, military access) and experimental vassal/master editing
 - **RAW data** — full lazy tree of the entire save (28M+ nodes) for advanced edits
-- English & Czech UI, quick-open list of your recent saves, guided first-run setup
-- Verified in game: money, XP, ranks, skill points, unit strength and save renaming all survive loading and re-saving
+- **5 UI themes** — Obsidian & Amber, Forge, Parchment & Seal, Dark Parchment, Blood Throne — switchable live in Settings, plus compact/airy table density
+- English & Czech UI, quick-open list of your recent saves, guided first-run setup, built-in update notification
+- Verified in game: money, XP, ranks, skill points, unit strength, save renaming and MP→SP conversion all survive loading and re-saving
 
 ![Screen1](https://i.imgur.com/LMqMp2m.png)
 ![Screen2](https://i.imgur.com/WTlmb15.png)
@@ -33,7 +36,7 @@ This app is **not code-signed** (certificates cost money), so Windows SmartScree
 ## Compatibility
 
 - Total War: WARHAMMER III, tested on patch 8.1.x (Immortal Empires), singleplayer and multiplayer saves
-- Older WH1/WH2 saves (ESF `0xABCA`) should parse as well, but are untested
+- Older-patch saves (ESF `0xABCA`) load and convert fine — verified on campaigns back to WH3 6.0
 
 ## Credits & inspiration
 
@@ -48,7 +51,7 @@ This app is **not code-signed** (certificates cost money), so Windows SmartScree
 Plans and ideas for future versions. No promises, no dates — this is a hobby project. 🙂
 Have a feature request? Open an issue!
 
-## Next up (v1.1)
+## Next up (v1.3)
 
 - [ ] **Territory & cities** — regions, provinces, buildings and garrisons: view & edit owners, building slots, construction progress
 - [ ] **Save doctor** — structural validation of a save (detects truncated/corrupted files and says exactly where), plus diagnostics for the most common "corrupted save" causes: missing mods and game version mismatch (both are stored in the save header)
@@ -56,14 +59,14 @@ Have a feature request? Open an issue!
 
 ## Planned
 
-- [ ] **Readable names** — resolve character/faction/unit localisation keys (`names_name_123…`) to real in-game names from the game's data packs
 - [ ] **Character respec** — reset spent skills and refund skill points
 - [ ] **Save diff** — compare two saves and show what changed (also useful for repairing a broken save from a healthy autosave)
 - [ ] **Search in RAW tree** — find nodes and values in the full save structure
-- [ ] **Warhammer-themed UI** — custom artwork, proper skin instead of the plain dark theme
+- [ ] **Singleplayer → Multiplayer conversion** — the other direction: bring a friend into your solo campaign
 
 ## Ideas / maybe someday
 
+- [ ] Adding new units to armies (needs cracking the save's unit-ID counter)
 - [ ] Editing of array values and coordinates (e.g. teleporting armies)
 - [ ] Diplomacy extras: reputation/treachery cleanup, war coordination targets
 - [ ] More UI languages (translations are simple JSON files — contributions welcome)
@@ -72,6 +75,7 @@ Have a feature request? Open an issue!
 
 ## Done
 
+- [x] **v1.2** *(includes everything planned for v1.1 — it was tested so quickly that both versions shipped as one release)* — **Multiplayer → Singleplayer conversion** (continue co-op campaigns solo, verified across campaigns, patches, player counts and host/client copies), **readable in-game names** for characters/factions/units/settlements, **5 UI themes** with live switching and table density options, army tools (heal / max rank / remove unit), converted-save naming, update notification, and fixes: rare *"decompressed size mismatch"* load failure (~1–2 % of saves), save-folder detection for SP-only players, max rank no longer touches lords/heroes
 - [x] **v1.0** — first public release: faction treasuries, characters (rank / XP / skill points), units (strength / rank / experience), diplomacy (relations & treaties, experimental vassals), save renaming, mod list with Workshop links, RAW tree editor, EN/CZ interface, verified in game on WH3 8.1.x (singleplayer & multiplayer saves)
 
   
