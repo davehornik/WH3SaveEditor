@@ -1,4 +1,4 @@
-![Banner](https://i.imgur.com/MSnnR6W.png)
+![Banner](banner.png)
 
 
 A savegame editor for **Total War: WARHAMMER III** — supports both **singleplayer** (`.save`) and **multiplayer** (`.save_multiplayer`) campaign saves.
@@ -18,8 +18,14 @@ A savegame editor for **Total War: WARHAMMER III** — supports both **singlepla
 - English & Czech UI, quick-open list of your recent saves, guided first-run setup, built-in update notification
 - Verified in game: money, XP, ranks, skill points, unit strength, save renaming and MP→SP conversion all survive loading and re-saving
 
-![Screen1](https://i.imgur.com/LMqMp2m.png)
-![Screen2](https://i.imgur.com/WTlmb15.png)
+<br/>
+
+<sub>(Since I am taking names from game language, I didn't bother changing mine for screenshots to EN from CZ)</sub>
+
+![Welcome screen](screen_obsidian.png)
+![Diplomacy>Units screen](screen_obsidian2.png)
+![Overview screen](screen_parchment.png)
+![Tools screen](screen_parchment_dark.png)
 
 ## Download & first run
 
