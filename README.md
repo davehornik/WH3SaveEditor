@@ -31,11 +31,15 @@ A savegame editor for **Total War: WARHAMMER III** — supports both **singlepla
 
 1. Download `WH3SaveEditor.exe` from the [latest release](https://github.com/davehornik/WH3SaveEditor/releases/latest)
 2. Run it — pick your language; the app finds your save folders automatically
-3. Edit, hit *Save as…*, load it in the game. **Always keep a backup of your original save.**
+3. Edit, hit *Save as…*, load it in the game
 
-## ⚠ Windows SmartScreen / antivirus warning
+> [!IMPORTANT]
+> **Always keep a backup of your original save.** The editor never overwrites your files on its own (*Save as…* creates a copy), but a backup costs nothing and saves campaigns.
 
-This app is **not code-signed** (certificates cost money), so Windows SmartScreen may show *"Windows protected your PC"* — click **More info → Run anyway**. Some antiviruses occasionally flag PyInstaller-packed executables as false positives — the original SaveParser had the same issue.
+## Windows SmartScreen / antivirus warning
+
+> [!WARNING]
+> This app is **not code-signed** (certificates cost money), so Windows SmartScreen may show *"Windows protected your PC"* — click **More info → Run anyway**. Some antiviruses occasionally flag PyInstaller-packed executables as false positives — the original SaveParser had the same issue.
 
 **Don't want to trust a random .exe?** Totally fair — message me and I'll send you the full source code so you can review it and build it yourself (plain Python + PySide6, single PyInstaller command).
 
@@ -54,8 +58,9 @@ This app is **not code-signed** (certificates cost money), so Windows SmartScree
   
 # Roadmap
 
-Plans and ideas for future versions. No promises, no dates — this is a hobby project. 🙂
-Have a feature request? Open an issue!
+> [!NOTE]
+> Plans and ideas for future versions. No promises, no dates — this is a hobby project. 🙂
+> Have a feature request? Open an issue!
 
 ## Next up (v1.3)
 
