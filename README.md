@@ -41,7 +41,11 @@ A savegame editor for **Total War: WARHAMMER III** — supports both **singlepla
 > [!WARNING]
 > This app is **not code-signed** (certificates cost money), so Windows SmartScreen may show *"Windows protected your PC"* — click **More info → Run anyway**. Some antiviruses occasionally flag PyInstaller-packed executables as false positives — the original SaveParser had the same issue.
 
-**Don't want to trust a random .exe?** Totally fair — message me and I'll send you the full source code so you can review it and build it yourself (plain Python + PySide6, single PyInstaller command).
+**Don't want to trust a random .exe?** Totally fair — the **full source code is right here in this repository**. Review it and build it yourself in a few commands: see [BUILDING.md](BUILDING.md). (Plain Python + PySide6, one PyInstaller command.)
+
+## Source code & license
+
+The complete source is published in this repo for transparency and security review under a **source-available license**: you may read it and build it for personal use, but redistribution, modification, derivative works (including AI-assisted ports to other languages) and commercial use are prohibited. See [LICENSE.md](LICENSE.md) for the exact terms — and if you'd like to do something the license doesn't allow (translations, packaging, …), just ask.
 
 ## Compatibility
 
@@ -82,7 +86,7 @@ A savegame editor for **Total War: WARHAMMER III** — supports both **singlepla
 - [ ] Diplomacy extras: reputation/treachery cleanup, war coordination targets
 - [ ] More UI languages (translations are simple JSON files — contributions welcome)
 - [ ] Code-signed releases (no more SmartScreen warning)
-- [ ] Publishing the full source code
+- [x] ~~Publishing the full source code~~ — done! Source-available in this repo since v1.2.1
 
 ## Done
 

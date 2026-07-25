@@ -1,0 +1,2 @@
+PySide6>=6.5
+zstandard>=0.21

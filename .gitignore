@@ -1,0 +1,7 @@
+__pycache__/
+build/
+dist/
+live_dist/
+*.spec
+settings.ini
+loc_cache.json
