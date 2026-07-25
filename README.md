@@ -1,4 +1,4 @@
-![Banner](banner.png)
+![Banner](assets/banner.png)
 
 
 A savegame editor for **Total War: WARHAMMER III** — supports both **singleplayer** (`.save`) and **multiplayer** (`.save_multiplayer`) campaign saves.
@@ -22,10 +22,10 @@ A savegame editor for **Total War: WARHAMMER III** — supports both **singlepla
 
 <sub>(Since I am taking names from game language, I didn't bother changing mine for screenshots to EN from CZ)</sub>
 
-![Welcome screen](screen_obsidian.png)
-![Diplomacy>Units screen](screen_obsidian2.png)
-![Overview screen](screen_parchment.png)
-![Tools screen](screen_parchment_dark.png)
+![Welcome screen](assets/screen_obsidian.png)
+![Diplomacy>Units screen](assets/screen_obsidian2.png)
+![Overview screen](assets/screen_parchment.png)
+![Tools screen](assets/screen_parchment_dark.png)
 
 ## Download & first run
 

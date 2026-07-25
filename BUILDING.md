@@ -33,6 +33,7 @@ That installs exactly two runtime dependencies:
 ## 3. Run from source
 
 ```
+cd src
 python gui.py
 ```
 
@@ -42,13 +43,19 @@ That's it — this is exactly how the app is developed and tested.
 
 ```
 pip install pyinstaller
+cd src
+python gen_version_info.py
 pyinstaller --noconfirm --clean --onefile --windowed --name WH3SaveEditor ^
+  --version-file version_info.txt ^
   --add-data "lang;lang" --add-data "fonts;fonts" --add-data "icon.ico;." ^
   --hidden-import convert_mp_sp --hidden-import zstandard ^
   --icon icon.ico gui.py
 ```
 
-The result is `dist\WH3SaveEditor.exe` (~48 MB — PyInstaller one-file bundles
+(`gen_version_info.py` generates the Windows version resource — file
+description, version, copyright — from `APP_VERSION` in `gui.py`.)
+
+The result is `src\dist\WH3SaveEditor.exe` (~48 MB — PyInstaller one-file bundles
 the Python runtime and Qt).
 
 > **Note on antivirus false positives:** PyInstaller's one-file bootloader
@@ -61,14 +68,14 @@ the Python runtime and Qt).
 
 | File               | Purpose                                                        |
 |--------------------|----------------------------------------------------------------|
-| `esf.py`           | ESF save-format parser + writer (lazy tree, copy-on-write)     |
-| `gui.py`           | PySide6 application (all pages, dialogs, update check)         |
-| `themes.py`        | UI themes (QSS templates + color tokens)                       |
-| `tables.py`        | extraction of factions/characters/units/diplomacy from the tree|
-| `convert_mp_sp.py` | multiplayer → singleplayer save conversion                     |
-| `locdb.py`         | readable names from the game's localisation packs              |
-| `i18n.py`          | UI translations (`lang/*.json`)                                |
-| `test_*.py`        | test suite (round-trip, deep-walk, encodings, GUI models)      |
+| `src/esf.py`           | ESF save-format parser + writer (lazy tree, copy-on-write)     |
+| `src/gui.py`           | PySide6 application (all pages, dialogs, update check)         |
+| `src/themes.py`        | UI themes (QSS templates + color tokens)                       |
+| `src/tables.py`        | extraction of factions/characters/units/diplomacy from the tree|
+| `src/convert_mp_sp.py` | multiplayer → singleplayer save conversion                     |
+| `src/locdb.py`         | readable names from the game's localisation packs              |
+| `src/i18n.py`          | UI translations (`src/lang/*.json`)                                |
+| `src/test_*.py`        | test suite (round-trip, deep-walk, encodings, GUI models)      |
 
 The app performs **one** network request: an optional version check against
 `api.github.com/repos/davehornik/WH3SaveEditor/releases/latest` on startup
