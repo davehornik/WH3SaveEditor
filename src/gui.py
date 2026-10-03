@@ -23,7 +23,7 @@ import locdb
 import themes
 from i18n import t
 
-APP_VERSION = "1.2.2"
+APP_VERSION = "1.2.3"
 
 # aktivní téma (slovník tokenů) — nastavuje set_theme(); výchozí dle themes.DEFAULT
 THEME = themes.theme(themes.DEFAULT)

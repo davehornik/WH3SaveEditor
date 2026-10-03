@@ -32,6 +32,18 @@ Everything not explicitly allowed above is prohibited. In particular, you may **
    it as training data for commercial machine-learning systems.
 5. **Remove or alter** copyright notices or this license.
 
+## Contributions (pull requests)
+
+Forking this repository **solely for the purpose of proposing changes back to
+it** through a pull request is permitted. Such a fork must not be presented,
+promoted or distributed as a usable product, and the prohibitions above
+continue to apply to it in every other respect.
+
+By submitting a contribution (pull request, patch or suggestion) you grant the
+Author a perpetual, irrevocable, worldwide, royalty-free license to use,
+modify, relicense and distribute that contribution as part of the Software.
+Contributors are credited in the release notes.
+
 ## Other terms
 
 - Third-party components retain their own licenses: the bundled JetBrains Mono

@@ -45,7 +45,7 @@ A savegame editor for **Total War: WARHAMMER III** — supports both **singlepla
 
 ## Source code & license
 
-The complete source is published in this repo for transparency and security review under a **source-available license**: you may read it and build it for personal use, but redistribution, modification, derivative works (including AI-assisted ports to other languages) and commercial use are prohibited. See [LICENSE.md](LICENSE.md) for the exact terms — and if you'd like to do something the license doesn't allow (translations, packaging, …), just ask.
+The complete source is published in this repo for transparency and security review under a **source-available license**: you may read it and build it for personal use, but redistribution, modification, derivative works (including AI-assisted ports to other languages) and commercial use are prohibited. **Pull requests are welcome** — forking in order to propose a fix is explicitly allowed, and contributors are credited in the release notes. See [LICENSE.md](LICENSE.md) for the exact terms — and if you'd like to do something the license doesn't allow (translations, packaging, …), just ask.
 
 ## Compatibility
 
@@ -68,16 +68,17 @@ The complete source is published in this repo for transparency and security revi
 
 ## Next up (v1.3)
 
-- [ ] **Territory & cities** — regions, provinces, buildings and garrisons: view & edit owners, building slots, construction progress
+- [ ] **Player roster editing for multiplayer saves** — add a player to a running co-op campaign, let one drop out and return later, or turn a solo campaign into a co-op one (the most requested feature so far)
+- [ ] **Faction resources** — edit pooled resources such as Blood Kisses, schematics, supplies etc.
 - [ ] **Save doctor** — structural validation of a save (detects truncated/corrupted files and says exactly where), plus diagnostics for the most common "corrupted save" causes: missing mods and game version mismatch (both are stored in the save header)
 - [ ] **Patch guard** — warn when a save comes from a newer game version than the editor was tested on
 
 ## Planned
 
+- [ ] **Territory & cities** — regions, provinces, buildings and garrisons: view & edit owners, building slots, construction progress
 - [ ] **Character respec** — reset spent skills and refund skill points
 - [ ] **Save diff** — compare two saves and show what changed (also useful for repairing a broken save from a healthy autosave)
 - [ ] **Search in RAW tree** — find nodes and values in the full save structure
-- [ ] **Singleplayer → Multiplayer conversion** — the other direction: bring a friend into your solo campaign
 
 ## Ideas / maybe someday
 
@@ -90,6 +91,7 @@ The complete source is published in this repo for transparency and security revi
 
 ## Done
 
+- [x] **v1.2.3** — fixed MP→SP conversion leaving the other players' factions "waiting for a human" at end of turn (the human/AI flag is stored twice in the save; thanks to LuxInTenebr1s for the root cause and HueTheCoder for the repro), exe now carries Windows version info, pull requests explicitly allowed by the license
 - [x] **v1.2** *(includes everything planned for v1.1 — it was tested so quickly that both versions shipped as one release)* — **Multiplayer → Singleplayer conversion** (continue co-op campaigns solo, verified across campaigns, patches, player counts and host/client copies), **readable in-game names** for characters/factions/units/settlements, **5 UI themes** with live switching and table density options, army tools (heal / max rank / remove unit), converted-save naming, update notification, and fixes: rare *"decompressed size mismatch"* load failure (~1–2 % of saves), save-folder detection for SP-only players, max rank no longer touches lords/heroes
 - [x] **v1.0** — first public release: faction treasuries, characters (rank / XP / skill points), units (strength / rank / experience), diplomacy (relations & treaties, experimental vassals), save renaming, mod list with Workshop links, RAW tree editor, EN/CZ interface, verified in game on WH3 8.1.x (singleplayer & multiplayer saves)
 

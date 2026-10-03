@@ -140,11 +140,16 @@ def convert(mp_path, keep, out_path, save_name):
                  if i != keep]
     facs = {f["key"]: f["record"] for f in tables.factions(s)}
     for dk in drop_keys:
-        cps = facs[dk].child("CAMPAIGN_PLAYER_SETUP")
-        human_node = next(c for c in cps.children
-                          if isinstance(c, Value) and c.type_name == "ascii"
-                          and str(c.value) in ("FULL_HUMAN", "NON_HUMAN"))
-        human_node.value = "NON_HUMAN"
+        rec = facs[dk]
+        # příznak je uložený DVAKRÁT: v CAMPAIGN_PLAYER_SETUP a znovu jako
+        # přímé dítě FACTION — s jen jedním přepnutým zůstane frakce
+        # v "třetím stavu" a hra se zasekne při přechodu kola
+        # (GitHub issue #1, fix od LuxInTenebr1s)
+        for node in (rec.child("CAMPAIGN_PLAYER_SETUP"), rec):
+            human_node = next(c for c in node.children
+                              if isinstance(c, Value) and c.type_name == "ascii"
+                              and str(c.value) in ("FULL_HUMAN", "NON_HUMAN"))
+            human_node.value = "NON_HUMAN"
 
     # CAMPAIGN_SETUP_LOCAL: faction of the LOCAL player = the kept one
     env = s.inner.root.child("CAMPAIGN_ENV")
