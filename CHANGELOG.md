@@ -2,6 +2,19 @@
 
 All notable changes to WH3 Save Editor. Downloads: https://github.com/davehornik/WH3SaveEditor/releases
 
+## v1.3.0 — 2026-10-11
+
+**Added**
+- Characters & units: new **Armies** tab — pick an army, convoy/caravan or garrison on the left and see its roster as unit cards with the game's own card art (read straight from the game packs, no extraction needed), strength bar and rank. Click a card for Heal, Set rank, Max rank, Duplicate or Remove; Ctrl+click or drag across cards to select several and apply Heal / Set rank / Max rank / Remove to all of them; the "+" card adds a unit. The Add unit dialog has a search box (name or key, accent-insensitive) over a list with card art, a rank selector (recruit straight at rank 0–9, or copy the template's rank and XP), an army picker with the lords' names and portraits, and can offer units of any faction in the world as templates. Card art is indexed in the background right after start-up, so the tab opens without a freeze.
+- The tab bar on the Characters & units page no longer moves when switching tabs: each tab now carries its own filter/button row.
+- Lord and hero portraits are resolved the way the game does it (agent subtype → art set → uniform → variant → portrait), so convoy masters, generic lords and mounted variants get their proper art; the few characters without any art get a neutral card with their faction's flag.
+- Faction flags from the game next to every faction: the Factions and Diplomacy tables, the faction picker in the toolbar and the player treasuries on the Overview page. Flag folders are resolved through the game's own `factions` table, so factions whose flag lives under a different name (e.g. Sayl, Thorek) get the right one too.
+- Tools: **Repair a converted save** — saves converted with v1.2–1.2.2 keep a stale "human player" flag on the other players' factions (the second copy of the flag that v1.2.3 started switching). The game puts such a faction back into the human turn group on load and then waits forever at end of turn for its move. The editor now detects this when a singleplayer save is loaded, offers the repair, and the Tools page has a button for it; the repair also works on campaigns played further since the conversion. (Found on a real save: the turn hung on "Dolgan", i.e. Sayl, the faction of the removed player.)
+- Units tab: **Add unit** — clones a template unit of the faction into a chosen army (full strength, rank 0 by default; armies are capped at the game's 20 units). New units get a fresh id from the save's command-queue index table, the same counter the game uses when recruiting, plus their own entry in the campaign AI's mirror of the world (`CAI_WORLD_UNITS`) — without it the game crashes on the first battle involving the unit (found by reverse engineering the game and a crash dump). Experimental: keep a backup of your save.
+
+**Fixed**
+- Remove unit now also removes the unit's entry from the campaign AI's mirror of the world (`CAI_WORLD_UNITS`) and from its army's AI unit list, instead of leaving a dangling reference behind.
+
 ## v1.2.4 — 2026-10-11
 
 **Added**

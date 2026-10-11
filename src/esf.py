@@ -464,6 +464,30 @@ class EsfFile:
             return Value(self, parent, start, start + 1, r.p, tag)
         raise ValueError("unknown node tag 0x%02X at 0x%X" % (tag, start))
 
+    # -- structural edits -----------------------------------------------------
+
+    def clone_entry(self, block, src, index=None):
+        """Vloží do RecordBlocku `block` kopii BlockEntry `src` (může být z jiného bloku).
+
+        Obsah zdrojového entry se připojí do „scratch" oblasti na konci dat, takže klon má vlastní
+        offsety a jeho děti se líně parsují jako u každého jiného uzlu; následné editace hodnot
+        klonu (např. nové id) fungují přes běžný copy-on-write. Klon je dirty (nemá před sebou
+        size varint), serializer ho poskládá z dětí. Vrací nový BlockEntry."""
+        raw = bytes(self.data[src.cstart:src.cend])
+        if not isinstance(self.data, bytearray):
+            self.data = bytearray(self.data)
+        cstart = len(self.data)
+        self.data += raw
+        ent = BlockEntry(self, block, cstart, cstart, cstart + len(raw))
+        ents = block.entries
+        if index is None:
+            ents.append(ent)
+        else:
+            ents.insert(index, ent)
+        block.count = len(ents)
+        ent.mark_dirty()
+        return ent
+
     # -- string management --------------------------------------------------
 
     def intern_utf16(self, s):

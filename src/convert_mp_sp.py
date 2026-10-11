@@ -164,6 +164,77 @@ def _set_u32_array(arr, ids):
     arr.mark_dirty()
 
 
+def _human_flag_node(rec):
+    return next((c for c in rec.children if isinstance(c, Value) and c.type_name == "ascii"
+                 and str(c.value) in HUMAN_STATES), None)
+
+
+def local_faction_key(save):
+    env = save.campaign_root.child("CAMPAIGN_ENV")
+    loc = env.child("CAMPAIGN_SETUP_LOCAL") if env is not None else None
+    return str(loc.children[0].value) if loc is not None and loc.children else None
+
+
+def stale_human_factions(save):
+    """[(id, key)] frakcí, které mají v CAMPAIGN_PLAYER_SETUP „NON_HUMAN", ale na záznamu
+    FACTION ještě lidský příznak — pozůstatek převodu verzí 1.2–1.2.2 (GitHub issue #1).
+    Hra si takovou frakci při načtení zařadí do lidské skupiny tahu a na konci tahu
+    čeká na její tah, který nikdy nepřijde (ověřeno 2026-10-11 na savu se Saylem/Dolgan)."""
+    local = local_faction_key(save)
+    out = []
+    for f in tables.factions(save):
+        if f["key"] == local:
+            continue
+        rec = f["record"]
+        ps = rec.child("CAMPAIGN_PLAYER_SETUP")
+        a = _human_flag_node(ps) if ps is not None else None
+        b = _human_flag_node(rec)
+        if a is not None and b is not None and str(a.value) == "NON_HUMAN" \
+                and str(b.value) != "NON_HUMAN":
+            out.append((f["id"], f["key"]))
+    return out
+
+
+def repair_converted(save):
+    """Opraví zaseknutý převedený singleplayer save (viz stale_human_factions): FACTION příznak
+    → NON_HUMAN, HUMAN_FACTIONS = jen lokální frakce, lidská TURN_GROUP = jen lokální frakce,
+    vše ostatní do největší AI skupiny. Vrací (opravené [(id, key)], přesunutá id)."""
+    if save.is_multiplayer:
+        raise ValueError("multiplayer save")
+    local = local_faction_key(save)
+    fac_ids = {f["key"]: f["id"] for f in tables.factions(save)}
+    if local not in fac_ids:
+        raise ValueError("local faction %r not found" % local)
+    keep_id = fac_ids[local]
+    fixed = stale_human_factions(save)
+    facs = {f["id"]: f["record"] for f in tables.factions(save)}
+    for fid, _key in fixed:
+        _human_flag_node(facs[fid]).value = "NON_HUMAN"
+    model = save.campaign_root.walk("CAMPAIGN_ENV", "CAMPAIGN_MODEL")
+    hf_arr = next(c for c in model.child("HUMAN_FACTIONS").children if isinstance(c, ValueArray))
+    if _u32_array_items(hf_arr) != [keep_id]:
+        _set_u32_array(hf_arr, [keep_id])
+    tc = model.child("WORLD").child("TURN_CONTROL")
+    tg_blk = next(c for c in tc.children if isinstance(c, RecordBlock))
+    groups = []
+    for e in tg_blk.entries:
+        arrs = [c for c in e.children if isinstance(c, ValueArray)]
+        if arrs:
+            groups.append((e, arrs[0], _u32_array_items(arrs[0])))
+    human = [g for g in groups if keep_id in g[2]]
+    moved = []
+    if len(human) == 1:
+        e, head, ids = human[0]
+        moved = [i for i in ids if i != keep_id]
+        if moved:
+            _set_u32_array(head, [keep_id])
+            others = [g for g in groups if g is not human[0]]
+            if others:
+                e2, head2, ids2 = max(others, key=lambda g: len(g[2]))
+                _set_u32_array(head2, ids2 + [i for i in moved if i not in ids2])
+    return fixed, moved
+
+
 def convert(mp_path, keep, out_path, save_name):
     s = SaveFile(mp_path)
     drop_key = None

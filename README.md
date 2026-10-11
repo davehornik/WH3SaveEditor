@@ -12,6 +12,9 @@ A savegame editor for **Total War: WARHAMMER III** — supports both **singlepla
 - **Factions** — all factions with editable treasury
 - **Characters** — lords & heroes including the recruitment pool: rank, XP and unspent skill points (all editable), with role detection (army / hero / caravan / garrison / recruit pool)
 - **Units** — every unit of every army: strength, max size, rank, experience (editable), grouped and filterable by army — plus one-click **Heal army**, **Max rank army** and **Remove unit**
+- **Armies** — the roster of any army, convoy or garrison as unit cards with the game's own card art (read straight from the game packs), strength bar and rank; click a card for Heal / Set rank / Max rank / Duplicate / Remove, select several with Ctrl+click or a selection rectangle, and **add units** with the "+" card: searchable list of templates (your faction's units or any unit in the world), recruited at full strength and any rank you choose
+- **Repair a converted save** — fixes saves converted with v1.2–1.2.2 that hang at end of turn (stale "human player" flag on the removed players' factions); detected automatically on load
+- Faction flags and lord portraits from the game throughout the UI
 - **Diplomacy** — relations between any two factions: war / peace / alliances via a color-coded picker, treaties (non-aggression pact, trade rights, military access) and experimental vassal/master editing
 - **RAW data** — full lazy tree of the entire save (28M+ nodes) for advanced edits
 - **5 UI themes** — Obsidian & Amber, Forge, Parchment & Seal, Dark Parchment, Blood Throne — switchable live in Settings, plus compact/airy table density
@@ -49,7 +52,7 @@ The complete source is published in this repo for transparency and security revi
 
 ## Compatibility
 
-- Total War: WARHAMMER III, tested on patch 8.1.x (Immortal Empires), singleplayer and multiplayer saves
+- Total War: WARHAMMER III, tested on patches 8.1.x and 9.0.3 (Immortal Empires), singleplayer and multiplayer saves
 - Older-patch saves (ESF `0xABCA`) load and convert fine — verified on campaigns back to WH3 6.0
 
 ## Credits & inspiration
@@ -82,7 +85,7 @@ The complete source is published in this repo for transparency and security revi
 
 ## Ideas / maybe someday
 
-- [ ] Adding new units to armies (needs cracking the save's unit-ID counter)
+- [x] ~~Adding new units to armies~~ — done in v1.3.0 (unit-ID counter and the campaign AI's unit mirror found by reverse engineering the game); units nobody in the world has yet (from the game database) are the next step
 - [ ] Editing of array values and coordinates (e.g. teleporting armies)
 - [ ] Diplomacy extras: reputation/treachery cleanup, war coordination targets
 - [ ] More UI languages (translations are simple JSON files — contributions welcome)
@@ -91,6 +94,7 @@ The complete source is published in this repo for transparency and security revi
 
 ## Done
 
+- [x] **v1.3.0** — **Add unit** (clone any unit of your faction, or of any faction in the world, into an army with a fresh id and its campaign-AI mirror — found by reverse engineering the game and a crash dump; verified through battles, turns and AI attacks), new **Armies** tab with unit cards from the game's own art, multi-select and bulk actions, searchable add-unit dialog with rank selection, faction flags and lord portraits everywhere, **Repair a converted save** for the end-of-turn hang of v1.2–1.2.2 conversions, Remove unit now cleans the AI mirror too
 - [x] **v1.2.4** — MP→SP conversion no longer reports "Done" with an empty path when a player had already left the game (the save marks such a faction `IDLE_HUMAN`, a third state the converter didn't know; GitHub issue #2), conversion errors are now reported properly, faction-id arrays are written with the game's own size-dependent encoding, and compact negative 32-bit integers are decoded with the correct sign convention (verified against the game's serializer code)
 - [x] **v1.2.3** — fixed MP→SP conversion leaving the other players' factions "waiting for a human" at end of turn (the human/AI flag is stored twice in the save; thanks to LuxInTenebr1s for the root cause and HueTheCoder for the repro), exe now carries Windows version info, pull requests explicitly allowed by the license
 - [x] **v1.2** *(includes everything planned for v1.1 — it was tested so quickly that both versions shipped as one release)* — **Multiplayer → Singleplayer conversion** (continue co-op campaigns solo, verified across campaigns, patches, player counts and host/client copies), **readable in-game names** for characters/factions/units/settlements, **5 UI themes** with live switching and table density options, army tools (heal / max rank / remove unit), converted-save naming, update notification, and fixes: rare *"decompressed size mismatch"* load failure (~1–2 % of saves), save-folder detection for SP-only players, max rank no longer touches lords/heroes

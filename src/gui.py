@@ -4,8 +4,9 @@ import os
 import sys
 
 from PySide6.QtCore import (Qt, QAbstractItemModel, QModelIndex, QThread,
-                            Signal, QSize)
-from PySide6.QtGui import QAction, QKeySequence, QColor, QBrush, QPalette
+                            Signal, QSize, QRect, QPoint)
+from PySide6.QtGui import (QAction, QKeySequence, QColor, QBrush, QPalette,
+                           QPixmap, QIcon, QPainter, QPen, QFont, QCursor)
 from PySide6.QtWidgets import (QApplication, QMainWindow, QTreeView, QFrame,
                                QFileDialog, QMessageBox, QTableWidget,
                                QTableWidgetItem, QLabel, QProgressDialog,
@@ -13,17 +14,244 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QTreeView, QFrame,
                                QTabWidget, QWidget, QVBoxLayout, QHBoxLayout,
                                QListWidget, QListWidgetItem, QStackedWidget,
                                QLineEdit, QFormLayout, QPushButton, QGroupBox,
-                               QStyledItemDelegate, QDialog, QDialogButtonBox)
+                               QStyledItemDelegate, QDialog, QDialogButtonBox,
+                               QScrollArea, QMenu, QInputDialog, QLayout,
+                               QCheckBox)
 
 from esf import (SaveFile, Record, RecordBlock, BlockEntry, Value, ValueArray,
                  UTF16, ASCII)
 import tables
 import i18n
 import locdb
+import packs
 import themes
 from i18n import t
 
-APP_VERSION = "1.2.4"
+
+# --- roster karet (záložka Armády) -----------------------------------------
+
+class FlowLayout(QLayout):
+    """Jednoduchý flow layout: položky se skládají zleva doprava a zalamují."""
+
+    def __init__(self, parent=None, margin=8, spacing=8):
+        super().__init__(parent)
+        self._items = []
+        self._sp = spacing
+        self.setContentsMargins(margin, margin, margin, margin)
+
+    def addItem(self, item):
+        self._items.append(item)
+
+    def count(self):
+        return len(self._items)
+
+    def itemAt(self, i):
+        return self._items[i] if 0 <= i < len(self._items) else None
+
+    def takeAt(self, i):
+        return self._items.pop(i) if 0 <= i < len(self._items) else None
+
+    def expandingDirections(self):
+        return Qt.Orientations(0)
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, w):
+        return self._do(QRect(0, 0, w, 0), True)
+
+    def setGeometry(self, r):
+        super().setGeometry(r)
+        self._do(r, False)
+
+    def sizeHint(self):
+        return self.minimumSize()
+
+    def minimumSize(self):
+        s = QSize()
+        for it in self._items:
+            s = s.expandedTo(it.minimumSize())
+        m = self.contentsMargins()
+        return s + QSize(m.left() + m.right(), m.top() + m.bottom())
+
+    def _do(self, rect, test):
+        m = self.contentsMargins()
+        x, y, line_h = rect.x() + m.left(), rect.y() + m.top(), 0
+        right = rect.right() - m.right()
+        for it in self._items:
+            sz = it.sizeHint()
+            if x + sz.width() > right and line_h > 0:
+                x, y, line_h = rect.x() + m.left(), y + line_h + self._sp, 0
+            if not test:
+                it.setGeometry(QRect(QPoint(x, y), sz))
+            x += sz.width() + self._sp
+            line_h = max(line_h, sz.height())
+        return y + line_h + m.bottom() - rect.y()
+
+    def clear(self):
+        while self._items:
+            it = self._items.pop()
+            w = it.widget()
+            if w is not None:
+                w.hide()               # nejdřív skrýt — widget bez rodiče by se na okamžik ukázal jako okno
+                w.setParent(None)
+                w.deleteLater()
+
+
+class PackWarmup(QThread):
+    """Na pozadí připraví index herních packů a mapu karet, aby záložka Armády nekousala."""
+    done = Signal(bool)
+
+    def run(self):
+        ok = False
+        try:
+            ok = bool(packs.warm_up())
+        except Exception:  # noqa: BLE001
+            ok = False
+        self.done.emit(ok)
+
+
+class RosterHost(QWidget):
+    """Plocha s kartami: tažení v prázdném místě = výběrový obdélník jako v Průzkumníku."""
+    band_start = Signal(QPoint, bool)     # lokální pozice, ctrl
+    band_move = Signal(QPoint)
+    band_end = Signal()
+
+    def mousePressEvent(self, ev):
+        if ev.button() == Qt.LeftButton:
+            self.band_start.emit(ev.position().toPoint(), bool(ev.modifiers() & Qt.ControlModifier))
+        super().mousePressEvent(ev)
+
+    def mouseMoveEvent(self, ev):
+        if ev.buttons() & Qt.LeftButton:
+            self.band_move.emit(ev.position().toPoint())
+        super().mouseMoveEvent(ev)
+
+    def mouseReleaseEvent(self, ev):
+        if ev.button() == Qt.LeftButton:
+            self.band_end.emit()
+        super().mouseReleaseEvent(ev)
+
+
+class UnitCard(QFrame):
+    """Karta jednotky jako v herním panelu armády: ikona 60×130, proužek síly, hodnost.
+    Levý klik → nabídka, Ctrl+klik → přepnout výběr, tažení → výběrový obdélník,
+    pravý klik → nabídka pro výběr."""
+    pressed = Signal(int, int)        # idx, ctrl (0/1)
+    released = Signal(int, bool)      # idx, dragged
+    drag_over = Signal(QPoint)        # globální pozice při tažení
+    context = Signal(int)
+    W, H = 74, 158
+
+    def __init__(self, idx, pixmap, name, hp, hp_max, rank, is_char, parent=None):
+        super().__init__(parent)
+        self.idx, self.pix, self.name = idx, pixmap, name
+        self.hp, self.hp_max, self.rank, self.is_char = hp, hp_max, rank, is_char
+        self.selected = False
+        self._press = None
+        self._dragged = False
+        self.setFixedSize(self.W, self.H)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip("%s\n%s: %s / %s\n%s: %s" % (
+            name, t("Síla"), hp, hp_max,
+            t("Postava") if is_char else t("Rank"), "" if is_char else rank))
+
+    def set_selected(self, on):
+        if self.selected != bool(on):
+            self.selected = bool(on)
+            self.update()
+
+    def mousePressEvent(self, ev):
+        if ev.button() == Qt.LeftButton:
+            self._press = ev.globalPosition().toPoint()
+            self._dragged = False
+            self.pressed.emit(self.idx, 1 if (ev.modifiers() & Qt.ControlModifier) else 0)
+        elif ev.button() == Qt.RightButton:
+            self.context.emit(self.idx)
+
+    def mouseMoveEvent(self, ev):
+        if self._press is not None and (ev.buttons() & Qt.LeftButton):
+            gp = ev.globalPosition().toPoint()
+            if self._dragged or (gp - self._press).manhattanLength() > 6:
+                self._dragged = True
+                self.drag_over.emit(gp)
+
+    def mouseReleaseEvent(self, ev):
+        if ev.button() == Qt.LeftButton and self._press is not None:
+            self._press = None
+            self.released.emit(self.idx, self._dragged)
+
+    def paintEvent(self, ev):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        frac = (self.hp / self.hp_max) if self.hp_max else 1.0
+        frac = max(0.0, min(1.0, frac))
+        p.fillRect(self.rect(), QColor(THEME["panel"]))
+        if self.selected:
+            sel = QColor(THEME["acc"])
+            sel.setAlpha(60)
+            p.fillRect(self.rect(), sel)
+        pen = QPen(QColor(THEME["acc"]) if (self.is_char or self.selected) else QColor(THEME["border"]),
+                   3 if self.selected else (2 if self.is_char else 1))
+        p.setPen(pen)
+        p.drawRect(self.rect().adjusted(1, 1, -2, -2))
+        icon = QRect(7, 7, 60, 130)
+        if self.pix is not None and not self.pix.isNull():
+            scaled = self.pix.scaled(icon.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            p.drawPixmap(icon.x() + (icon.width() - scaled.width()) // 2,
+                         icon.y() + (icon.height() - scaled.height()) // 2, scaled)
+        else:
+            p.fillRect(icon, QColor(THEME["input"]))
+            f = QFont()
+            f.setPointSize(7)
+            p.setFont(f)
+            p.setPen(QColor(THEME["muted"]))
+            p.drawText(icon.adjusted(2, 2, -2, -2), Qt.AlignCenter | Qt.TextWordWrap, self.name)
+        bar = QRect(7, 7, 60, 5)
+        p.fillRect(bar, QColor(0, 0, 0, 170))
+        col = QColor("#3fbf5f") if frac > 0.66 else QColor("#e0b020") if frac > 0.33 else QColor("#d9463e")
+        p.fillRect(QRect(7, 7, int(60 * frac), 5), col)
+        f = QFont()
+        f.setPointSize(8)
+        f.setBold(True)
+        p.setFont(f)
+        p.setPen(QColor(THEME["text"]))
+        label = "%d%%" % round(frac * 100)
+        if not self.is_char:
+            label += "   ★%d" % self.rank
+        p.drawText(QRect(0, self.H - 20, self.W, 18), Qt.AlignCenter, label)
+        p.end()
+
+
+class AddCard(QFrame):
+    """Karta „+" na konci rosteru: otevře dialog přidání jednotky."""
+    clicked = Signal()
+
+    def __init__(self, enabled=True, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(UnitCard.W, UnitCard.H)
+        self.setEnabled(enabled)
+        self.setCursor(Qt.PointingHandCursor if enabled else Qt.ForbiddenCursor)
+
+    def mousePressEvent(self, ev):
+        if self.isEnabled():
+            self.clicked.emit()
+
+    def paintEvent(self, ev):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.fillRect(self.rect(), QColor(THEME["panel"]))
+        pen = QPen(QColor(THEME["acc"] if self.isEnabled() else THEME["faint"]), 1, Qt.DashLine)
+        p.setPen(pen)
+        p.drawRect(self.rect().adjusted(1, 1, -2, -2))
+        f = QFont()
+        f.setPointSize(26)
+        f.setBold(True)
+        p.setFont(f)
+        p.drawText(self.rect(), Qt.AlignCenter, "+")
+        p.end()
+
+APP_VERSION = "1.3.0"
 
 # aktivní téma (slovník tokenů) — nastavuje set_theme(); výchozí dle themes.DEFAULT
 THEME = themes.theme(themes.DEFAULT)
@@ -471,6 +699,7 @@ class MainWindow(QMainWindow):
         lbl = QLabel(t("  Frakce: "))
         tb.addWidget(lbl)
         self.fac_combo = QComboBox()
+        self.fac_combo.setIconSize(QSize(20, 20))
         self.fac_combo.setEditable(True)
         self.fac_combo.setInsertPolicy(QComboBox.NoInsert)
         self.fac_combo.setMinimumWidth(340)
@@ -880,6 +1109,7 @@ class MainWindow(QMainWindow):
 
     def _page_tables(self):
         self.fact_table = self._make_table(["#", "Frakce", "Klíč", "Peníze"])
+        self.fact_table.setIconSize(QSize(22, 22))
         self.char_table = self._make_table(["ID", "Role", "Typ", "Subtyp", "Jméno",
                                             "Body", "Rank", "XP"], stretch=4)
         self.unit_table = self._make_table(["Armáda", "Jednotka", "Síla", "Max",
@@ -890,29 +1120,60 @@ class MainWindow(QMainWindow):
                                    ("Vše", "Hratelné", "Armády", "Hrdinové",
                                     "Karavany", "Garnizony", "Naverbovatelní")])
         self.role_filter.currentIndexChanged.connect(lambda *_: self._refresh_chars())
-        self.role_filter.setVisible(False)
         self.unit_filter = QComboBox()
         self.unit_filter.setSizeAdjustPolicy(QComboBox.AdjustToContents)
         self.unit_filter.setMinimumWidth(240)
         self.unit_filter.currentIndexChanged.connect(lambda *_: self._refresh_units())
-        self.unit_filter.setVisible(False)
-        tabs = QTabWidget()
-        tabs.addTab(self.fact_table, t("Frakce"))
-        tabs.addTab(self.char_table, t("Postavy"))
-        tabs.addTab(self.unit_table, t("Jednotky"))
-        def on_tab(i):
-            self.role_filter.setVisible(i == 1)
-            self.unit_filter.setVisible(i == 2)
-            self.btn_heal.setVisible(i == 2)
-            self.btn_maxrank.setVisible(i == 2)
-            self.btn_delunit.setVisible(i == 2)
-        tabs.currentChanged.connect(on_tab)
-        box = QWidget()
-        lay = QVBoxLayout(box)
-        lay.setContentsMargins(12, 12, 12, 12)
-        row = QHBoxLayout()
-        row.addWidget(self.role_filter)
-        row.addWidget(self.unit_filter)
+        # --- záložka Armády: seznam sil vlevo, roster karet vpravo ---
+        self.army_kind = QComboBox()
+        self.army_kind.addItems([t("Armády"), t("Konvoje a karavany"), t("Garnizony")])
+        self.army_kind.currentIndexChanged.connect(lambda *_: self._refresh_army_list())
+        self.army_list = QListWidget()
+        self.army_list.setIconSize(QSize(30, 65))
+        self.army_list.setFixedWidth(330)
+        self.army_list.currentRowChanged.connect(lambda *_: self._refresh_roster())
+        self.roster_host = RosterHost()
+        self.roster_host.band_start.connect(lambda pos, ctrl: self._band_begin(pos, ctrl, None))
+        self.roster_host.band_move.connect(self._band_update)
+        self.roster_host.band_end.connect(self._band_end)
+        from PySide6.QtWidgets import QRubberBand
+        self.roster_band = QRubberBand(QRubberBand.Rectangle, self.roster_host)
+        self._band_origin = None
+        self._band_base = set()
+        self.roster_flow = FlowLayout(self.roster_host, 10, 10)
+        roster_scroll = QScrollArea()
+        roster_scroll.setWidgetResizable(True)
+        roster_scroll.setWidget(self.roster_host)
+        roster_scroll.setFrameShape(QFrame.NoFrame)
+        self.roster_title = QLabel("")
+        self.roster_title.setObjectName("title")
+        roster_hint = QLabel("ⓘ " + t("Klik na kartu = nabídka akcí, Ctrl+klik nebo tažení myší označí víc karet, karta „+“ přidá jednotku."))
+        roster_hint.setObjectName("muted")
+        roster_page = QWidget()
+        rpv = QVBoxLayout(roster_page)
+        rpv.setContentsMargins(0, 8, 0, 0)
+        rpv.setSpacing(8)
+        kind_row = QHBoxLayout()
+        kind_row.addWidget(self.army_kind)
+        kind_row.addStretch(1)
+        rpv.addLayout(kind_row)
+        rh = QHBoxLayout()
+        rh.setContentsMargins(0, 0, 0, 0)
+        rh.addWidget(self.army_list)
+        rv = QVBoxLayout()
+        rv.addWidget(self.roster_title)
+        rv.addWidget(roster_scroll, 1)
+        rv.addWidget(roster_hint)
+        rh.addLayout(rv, 1)
+        rpv.addLayout(rh, 1)
+        self._pix_cache = {}
+        self._roster_fid = None
+        self._roster_sel_ids = set()
+        self._roster_cards = []
+        self._packs_progress = None
+        # --- stránky s vlastní lištou filtrů/tlačítek: lišta záložek se tak nikdy nehýbe ---
+        self.btn_addunit = QPushButton("+ " + t("Přidat jednotku"))
+        self.btn_addunit.clicked.connect(self._add_unit_dialog)
         self.btn_heal = QPushButton("✚ " + t("Uzdravit armádu"))
         self.btn_heal.clicked.connect(lambda: self._army_action("heal"))
         self.btn_maxrank = QPushButton("▲ " + t("Max rank armádě"))
@@ -920,11 +1181,36 @@ class MainWindow(QMainWindow):
         self.btn_delunit = QPushButton("✕ " + t("Odebrat jednotku"))
         self.btn_delunit.setProperty("role", "danger")
         self.btn_delunit.clicked.connect(self._delete_unit)
-        for b in (self.btn_heal, self.btn_maxrank, self.btn_delunit):
-            b.setVisible(False)
-            row.addWidget(b)
-        row.addStretch(1)
-        lay.addLayout(row)
+
+        def page(toolbar_widgets, content):
+            w = QWidget()
+            v = QVBoxLayout(w)
+            v.setContentsMargins(0, 8, 0, 0)
+            v.setSpacing(8)
+            if toolbar_widgets:
+                row = QHBoxLayout()
+                for x in toolbar_widgets:
+                    row.addWidget(x)
+                row.addStretch(1)
+                v.addLayout(row)
+            v.addWidget(content, 1)
+            return w
+
+        tabs = QTabWidget()
+        tabs.addTab(page([], self.fact_table), t("Frakce"))
+        tabs.addTab(page([self.role_filter], self.char_table), t("Postavy"))
+        tabs.addTab(page([self.unit_filter, self.btn_addunit, self.btn_heal,
+                          self.btn_maxrank, self.btn_delunit], self.unit_table), t("Jednotky"))
+        tabs.addTab(roster_page, t("Armády"))
+        self.tables_tabs = tabs
+
+        def on_tab(i):
+            if i == 3:
+                self._refresh_army_list()
+        tabs.currentChanged.connect(on_tab)
+        box = QWidget()
+        lay = QVBoxLayout(box)
+        lay.setContentsMargins(12, 12, 12, 12)
         lay.addWidget(tabs)
         return box
 
@@ -936,6 +1222,7 @@ class MainWindow(QMainWindow):
         from PySide6.QtWidgets import QRadioButton, QCheckBox, QButtonGroup
         self.diplo_table = self._make_table(["Frakce", "Klíč", "Postoj", "Vztah"],
                                             stretch=0)
+        self.diplo_table.setIconSize(QSize(22, 22))
         self.diplo_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.diplo_table.cellClicked.connect(self._diplo_select)
         detail = SectionPanel(t("Detail vztahu"))
@@ -1108,8 +1395,65 @@ class MainWindow(QMainWindow):
         b.clicked.connect(self.mp_to_sp_dialog)
         gv.addWidget(b, alignment=Qt.AlignLeft)
         v.addWidget(g)
+        g2 = SectionPanel(t("Oprava převedeného savu"))
+        gv2 = g2.body
+        desc2 = QLabel(t("Savy převedené verzí 1.2 až 1.2.2 mají u frakcí ostatních hráčů "
+                         "zaseknutý příznak hráče: hra je po načtení zařadí mezi lidské hráče "
+                         "a na konci tahu čeká na jejich tah, který nikdy nepřijde. Oprava "
+                         "příznak přepne a frakce vrátí mezi AI. Funguje i na rozehraném savu."))
+        desc2.setWordWrap(True)
+        gv2.addWidget(desc2)
+        self.btn_repair = QPushButton(t("Opravit načtený save"))
+        self.btn_repair.setEnabled(False)
+        self.btn_repair.clicked.connect(self._repair_converted)
+        gv2.addWidget(self.btn_repair, alignment=Qt.AlignLeft)
+        v.addWidget(g2)
         v.addStretch(1)
         return w
+
+    def _check_converted_save(self):
+        """Po načtení SP savu: nabídne opravu zaseknutého příznaku hráče (issue #1 u verzí 1.2.x)."""
+        import convert_mp_sp as conv
+        if self.save_file is None or self.save_file.is_multiplayer:
+            return
+        try:
+            stale = conv.stale_human_factions(self.save_file)
+        except Exception:  # noqa: BLE001
+            return
+        if not stale:
+            return
+        names = ", ".join("%s (%d)" % (locdb.faction(k) or k, i) for i, k in stale)
+        ans = QMessageBox.question(
+            self, t("Oprava převedeného savu"),
+            t("Tento save má zaseknutý příznak hráče u frakce: %s.\n\nJe to pozůstatek převodu "
+              "multiplayer → singleplayer starší verzí editoru — hra by se při konci tahu "
+              "zasekla na tahu této frakce. Opravit teď? (Potom save ulož přes „Uložit jako…“.)") % names,
+            QMessageBox.Yes | QMessageBox.No)
+        if ans == QMessageBox.Yes:
+            self._repair_converted()
+
+    def _repair_converted(self):
+        import convert_mp_sp as conv
+        if self.save_file is None:
+            return
+        if self.save_file.is_multiplayer:
+            QMessageBox.information(self, t("Nástroje"),
+                                    t("Tohle je multiplayer save — oprava se týká jen převedených singleplayer savů."))
+            return
+        try:
+            fixed, moved = conv.repair_converted(self.save_file)
+        except Exception as e:  # noqa: BLE001
+            QMessageBox.critical(self, t("Chyba"), "%s: %s" % (type(e).__name__, e))
+            return
+        if not fixed and not moved:
+            QMessageBox.information(self, t("Nástroje"), t("Save je v pořádku, nebylo co opravit."))
+            return
+        self.mark_modified()
+        QMessageBox.information(
+            self, t("Nástroje"),
+            t("Opraveno. Frakce vrácené mezi AI: %s\n\nNezapomeň save uložit přes „Uložit jako…“.")
+            % ", ".join("%s (%d)" % (locdb.faction(k) or k, i) for i, k in fixed) if fixed
+            else t("Opraveno: skupiny tahu srovnané.\n\nNezapomeň save uložit přes „Uložit jako…“."))
 
     def _local_profile(self):
         """(utf16 string, u64) z nejnovějšího lokálního SP savu."""
@@ -1186,6 +1530,7 @@ class MainWindow(QMainWindow):
         conv.PROFILE = profile
         self.progress = QProgressDialog(t("Převádím (LZMA komprese)…"), "",
                                         0, 0, self)
+        self.progress.setWindowTitle(t("Převod multiplayer → singleplayer"))
         self.progress.setCancelButton(None)
         self.progress.setWindowModality(Qt.WindowModal)
         self.progress.setMinimumDuration(300)
@@ -1257,9 +1602,12 @@ class MainWindow(QMainWindow):
         nodes = []
         self._table_nodes[table] = nodes
         for r, cells in enumerate(rows):
-            for col, (val, node) in enumerate(cells):
+            for col, cell in enumerate(cells):
+                val, node = cell[0], cell[1]
                 it = QTableWidgetItem()
                 it.setData(Qt.DisplayRole, val)
+                if len(cell) > 2 and cell[2] is not None:
+                    it.setIcon(cell[2])          # např. vlajka frakce
                 if col and isinstance(val, (int, float)) and not isinstance(val, bool):
                     it.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
                     if THEME.get("numColor"):
@@ -1357,6 +1705,9 @@ class MainWindow(QMainWindow):
         self._edit_count = 0
         self.unsaved_lbl.setVisible(False)
         self.statusBar().showMessage(t("Načteno: %s") % path)
+        if hasattr(self, "btn_repair"):
+            self.btn_repair.setEnabled(not self.save_file.is_multiplayer)
+        self._check_converted_save()
 
     def _set_mods_label(self):
         hdr = self.save_file.outer.root.child("SAVE_GAME_HEADER_MULTIPLAYER") or \
@@ -1487,6 +1838,12 @@ class MainWindow(QMainWindow):
             roww.setProperty("class", "row")
             h = QHBoxLayout(roww)
             h.setContentsMargins(0, 0, 0, 0)
+            icon = self._flag_icon(key)
+            if icon is not None:
+                fl = QLabel()
+                fl.setPixmap(icon.pixmap(24, 24))
+                fl.setFixedWidth(28)
+                h.addWidget(fl)
             lbl = QLabel(label)
             h.addWidget(lbl, 1)          # input + tlačítko k pravému okraji
             ed = QLineEdit(str(node.value))
@@ -1521,10 +1878,32 @@ class MainWindow(QMainWindow):
 
     # -- tables pages --------------------------------------------------------
 
+    def _flag_icon(self, key):
+        """QIcon vlajky frakce (24 px) z herních packů, cache; None když chybí."""
+        if not hasattr(self, "_flag_cache"):
+            self._flag_cache = {}
+        key = str(key)
+        if key in self._flag_cache:
+            return self._flag_cache[key]
+        icon = None
+        if packs.ready():
+            try:
+                png = packs.faction_flag(key, 24)
+                if png:
+                    pm = QPixmap()
+                    if pm.loadFromData(png):
+                        icon = QIcon(pm)
+            except Exception:  # noqa: BLE001
+                icon = None
+        self._flag_cache[key] = icon
+        return icon
+
     def populate_factions(self):
         facs = tables.factions(self.save_file)
+        if not packs.ready():
+            packs.build_index()          # vlajky do tabulek (index je rychlý, ~1 s)
         self._fill_table(self.fact_table, [
-            [(f["index"], None), (tables.pretty_faction(f["key"]), None),
+            [(f["index"], None), (tables.pretty_faction(f["key"]), None, self._flag_icon(f["key"])),
              (f["key"], None),
              (f["money"].value if f["money"] else "", f["money"])]
             for f in facs])
@@ -1536,7 +1915,11 @@ class MainWindow(QMainWindow):
                           or f["key"] in self._player_factions),
                          key=lambda x: x[0].lower())
         for label, key in entries:
-            self.fac_combo.addItem("%s   (%s)" % (label, key), key)
+            icon = self._flag_icon(key)
+            if icon is not None:
+                self.fac_combo.addItem(icon, "%s   (%s)" % (label, key), key)
+            else:
+                self.fac_combo.addItem("%s   (%s)" % (label, key), key)
         self._loading = False
         self._last_key = None
         default = next((k for k in self._player_factions
@@ -1570,13 +1953,16 @@ class MainWindow(QMainWindow):
         self.unit_filter.setCurrentIndex(i if i >= 0 else 0)
         self._loading = False
         self._refresh_units()
+        self._world_templates = None
+        if getattr(self, "tables_tabs", None) is not None and self.tables_tabs.currentIndex() == 3:
+            self._refresh_army_list()
         dip = tables.diplomacy(self.save_file, key)
         self._stance_partners = {}
         self._dip_by_key = {d["target_key"]: d for d in dip}
         self._dip_sel = None
         rows = []
         for d in dip:
-            rows.append([(tables.pretty_faction(d["target_key"]), None),
+            rows.append([(tables.pretty_faction(d["target_key"]), None, self._flag_icon(d["target_key"])),
                          (d["target_key"], None),
                          (d["stance"].value if d["stance"] else "", None),
                          (d["score"].value if d["score"] else 0, d["score"])])
@@ -1608,7 +1994,7 @@ class MainWindow(QMainWindow):
                     changed += 1
             elif kind == "rank" and u["rank"] and u["rank"].value != 9:
                 # jednotky lordů/hrdinů přeskočit — jejich úroveň je v postavě
-                if u["commander"] or "_cha_" in u["unit_key"]:
+                if tables.is_character_unit(u):
                     continue
                 u["rank"].value = 9
                 changed += 1
@@ -1648,7 +2034,7 @@ class MainWindow(QMainWindow):
         if tag is None:
             return
         u = self._units[tag]
-        if u["commander"] or "_cha_" in u["unit_key"]:
+        if tables.is_character_unit(u):
             QMessageBox.warning(self, t("Jednotky"),
                                 t("Tohle je jednotka lorda/hrdiny — tu odebrat "
                                   "nelze, patří k postavě."))
@@ -1659,10 +2045,605 @@ class MainWindow(QMainWindow):
                   "funkce — měj zálohu savu.)") % tables.pretty_unit(u["unit_key"])) \
                 != QMessageBox.Yes:
             return
-        u["entry"].delete()
+        try:
+            tables.remove_unit(self.save_file, u)
+        except Exception as e:  # noqa: BLE001
+            QMessageBox.critical(self, t("Chyba"), "%s: %s" % (type(e).__name__, e))
+            return
         self.mark_modified()
         self._last_key = None
         self.faction_selected()
+
+    ARMY_UNIT_LIMIT = 20            # hra neumí víc jednotek v armádě (vč. lorda)
+
+    # -- záložka Armády (roster karet) ---------------------------------------
+
+    def _pixmap_for(self, key, is_char=False):
+        """QPixmap ikony/portrétu jednotky z herních packů (cache; None když chybí)."""
+        key = str(key)
+        if key in self._pix_cache:
+            return self._pix_cache[key]
+        if not packs.ready():
+            return None                 # index se teprve připravuje na pozadí
+        pm = None
+        try:
+            if key == "__placeholder__":
+                png = packs.placeholder()
+            else:
+                png = packs.character_portrait_for_unit(key) if is_char else None
+            if png is None:
+                png = packs.unit_icon(key)
+            if png:
+                pm = QPixmap()
+                if not pm.loadFromData(png):
+                    pm = None
+        except Exception:  # noqa: BLE001
+            pm = None
+        if pm is None and is_char:
+            pm = self._generic_leader_pixmap()
+        self._pix_cache[key] = pm
+        return pm
+
+    def _generic_leader_pixmap(self):
+        """Náhradní karta lorda bez artu: tmavá karta s vlajkou vybrané frakce (ať nebije do očí)."""
+        key = "__generic__" + str(getattr(self, "_last_key", "") or "")
+        if key in self._pix_cache:
+            return self._pix_cache[key]
+        pm = QPixmap(60, 130)
+        pm.fill(QColor(THEME["input"]))
+        p = QPainter(pm)
+        p.setPen(QPen(QColor(THEME["border"]), 1))
+        p.drawRect(0, 0, 59, 129)
+        flag = None
+        try:
+            png = packs.faction_flag(self._last_key, 64) if self._last_key else None
+            if png:
+                flag = QPixmap()
+                if not flag.loadFromData(png):
+                    flag = None
+        except Exception:  # noqa: BLE001
+            flag = None
+        if flag is not None:
+            f = flag.scaled(44, 44, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            p.setOpacity(0.85)
+            p.drawPixmap((60 - f.width()) // 2, (130 - f.height()) // 2, f)
+        p.end()
+        self._pix_cache[key] = pm
+        return pm
+
+    def _leader_icon(self, unit_key):
+        """Malá čtvercová ikona lorda (výřez obličeje z karty 60×130) pro rozbalováky."""
+        if not hasattr(self, "_leader_cache"):
+            self._leader_cache = {}
+        key = str(unit_key)
+        if key in self._leader_cache:
+            return self._leader_cache[key]
+        icon = None
+        pm = self._pixmap_for(key, is_char=True) if key else None
+        if pm is not None and not pm.isNull():
+            side = min(pm.width(), pm.height())
+            icon = QIcon(pm.copy(QRect(0, 6 if pm.height() > side + 6 else 0, side, side)))
+        self._leader_cache[key] = icon
+        return icon
+
+    def _force_entries(self, kinds=None):
+        """[(force_id, popisek, klíč jednotky velitele)] sil vybrané frakce; `kinds` = podle
+        filtru druhu na záložce Armády (None = všechny druhy)."""
+        if self.save_file is None or not hasattr(self, "_units"):
+            return []
+        want = kinds or {0: ("army",), 1: ("caravan",), 2: ("garrison",)}[self.army_kind.currentIndex()]
+        ftypes = tables.forces(self.save_file, self._last_key) if self._last_key else {}
+        commander_key = {}
+        for u in self._units:
+            if u["commander"] and u["force_id"] not in commander_key:
+                commander_key[u["force_id"]] = u["unit_key"]
+        counts = {}
+        for u in self._units:
+            counts[u["force_id"]] = counts.get(u["force_id"], 0) + 1
+        out, seen = [], set()
+        for c in self._chars:
+            fid = c.get("force_id")
+            if not c["active"] or not fid or fid in seen or fid not in counts:
+                continue
+            kind = c["kind"]
+            if ftypes.get(fid, {}).get("type") == "CONVOY" or kind == "caravan":
+                kind = "caravan"
+            if kind not in want:
+                continue
+            seen.add(fid)
+            label = self._unit_labels.get(fid, t("Armáda %d") % fid)
+            if c["name"]:
+                label = "%s – %s" % (label.split(" – ")[0], c["name"])
+            out.append((fid, "%s  (%d/%d)" % (label, counts[fid], self.ARMY_UNIT_LIMIT),
+                        commander_key.get(fid)))
+        return out
+
+    def _start_pack_warmup(self):
+        """Spustí přípravu indexu packů na pozadí (jednou za běh aplikace)."""
+        if getattr(self, "_warmup", None) is not None or packs.ready():
+            return
+        self._warmup = PackWarmup(self)
+        self._warmup.done.connect(self._pack_warmup_done)
+        self._warmup.start()
+
+    def _pack_warmup_done(self, ok):
+        if self._packs_progress is not None:
+            self._packs_progress.close()
+            self._packs_progress = None
+        if getattr(self, "tables_tabs", None) is not None and self.tables_tabs.currentIndex() == 3:
+            self._refresh_army_list()
+
+    def _packs_ready_or_wait(self):
+        """True, když jsou ikony k dispozici; jinak ukáže průběh a vrátí False (překreslí se po dokončení)."""
+        if packs.ready() and packs._card_map is not None:
+            return True
+        self._start_pack_warmup()
+        if self._packs_progress is None:
+            dlg = QProgressDialog(t("Načítám ikony jednotek z herních packů…"), None, 0, 0, self)
+            dlg.setWindowTitle(t("Armády"))
+            dlg.setWindowModality(Qt.NonModal)
+            dlg.setMinimumDuration(0)
+            dlg.setCancelButton(None)
+            dlg.show()
+            self._packs_progress = dlg
+        return False
+
+    def _refresh_army_list(self):
+        if self.save_file is None or not hasattr(self, "_units"):
+            self.army_list.clear()
+            self.roster_flow.clear()
+            return
+        if not self._packs_ready_or_wait():
+            return
+        keep = self._roster_fid
+        self.army_list.blockSignals(True)
+        self.army_list.clear()
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            for fid, label, ckey in self._force_entries():
+                it = QListWidgetItem(label)
+                it.setData(Qt.UserRole, fid)
+                pm = self._pixmap_for(ckey, is_char=True) if ckey else None
+                if pm is None:
+                    pm = self._pixmap_for("__placeholder__")
+                if pm is not None:
+                    it.setIcon(QIcon(pm))
+                self.army_list.addItem(it)
+        finally:
+            QApplication.restoreOverrideCursor()
+        self.army_list.blockSignals(False)
+        row = 0
+        for i in range(self.army_list.count()):
+            if self.army_list.item(i).data(Qt.UserRole) == keep:
+                row = i
+                break
+        if self.army_list.count():
+            self.army_list.setCurrentRow(row)
+        self._refresh_roster()
+
+    def _refresh_roster(self):
+        self.roster_flow.clear()
+        it = self.army_list.currentItem()
+        if it is None or self.save_file is None:
+            self.roster_title.setText("")
+            self._roster_fid = None
+            return
+        fid = it.data(Qt.UserRole)
+        if fid != self._roster_fid:
+            self._roster_sel_ids = set()
+        self._roster_fid = fid
+        rows = [(i, u) for i, u in enumerate(self._units) if u["force_id"] == fid]
+        self._roster_cards = []
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            for i, u in rows:
+                is_char = tables.is_character_unit(u)
+                card = UnitCard(i, self._pixmap_for(u["unit_key"], is_char),
+                                tables.pretty_unit(u["unit_key"]),
+                                u["hp"].value if u["hp"] else 0,
+                                u["hp_max"].value if u["hp_max"] else 0,
+                                u["rank"].value if u["rank"] else 0, is_char)
+                card.set_selected(u["unit_id"] in self._roster_sel_ids)
+                card.pressed.connect(self._card_pressed)
+                card.released.connect(self._card_released)
+                card.drag_over.connect(self._card_drag_over)
+                card.context.connect(self._card_context)
+                self._roster_cards.append(card)
+                self.roster_flow.addWidget(card)
+        finally:
+            QApplication.restoreOverrideCursor()
+        self._roster_sel_ids &= {u["unit_id"] for _, u in rows}
+        full = len(rows) >= self.ARMY_UNIT_LIMIT
+        add = AddCard(enabled=not full)
+        add.setToolTip(t("Armáda už má %d jednotek, víc hra neumí.") % self.ARMY_UNIT_LIMIT
+                       if full else t("Přidat jednotku do této armády"))
+        add.clicked.connect(lambda: self._add_unit_dialog(force_id=fid))
+        self.roster_flow.addWidget(add)
+        self.roster_title.setText(it.text())
+
+    # -- výběr karet -----------------------------------------------------------
+
+    def _exec_menu(self, menu):
+        """Otevře kontextovou nabídku u kurzoru (testy tuhle metodu nahrazují)."""
+        return menu.exec(QCursor.pos())
+
+    def _selected_cards(self):
+        return [c for c in self._roster_cards if c.selected]
+
+    def _set_card_selected(self, card, on):
+        card.set_selected(on)
+        uid = self._units[card.idx]["unit_id"]
+        if on:
+            self._roster_sel_ids.add(uid)
+        else:
+            self._roster_sel_ids.discard(uid)
+
+    def _roster_clear_selection(self):
+        for c in self._roster_cards:
+            c.set_selected(False)
+        self._roster_sel_ids = set()
+
+    def _card_by_idx(self, idx):
+        return next((c for c in self._roster_cards if c.idx == idx), None)
+
+    # výběrový obdélník (jako v Průzkumníku): bez Ctrl = výběr jen to, co je v rámečku,
+    # s Ctrl = původní výběr + rámeček
+    def _band_begin(self, local_pos, ctrl, origin_card):
+        if not ctrl:
+            self._roster_clear_selection()
+        self._band_base = set(self._roster_sel_ids)
+        if origin_card is not None:
+            self._set_card_selected(origin_card, True if not ctrl else not origin_card.selected)
+            self._band_base = set(self._roster_sel_ids)
+        self._band_origin = local_pos
+        self.roster_band.setGeometry(QRect(local_pos, QSize()))
+        self.roster_band.hide()
+
+    def _band_update(self, local_pos):
+        if self._band_origin is None:
+            return
+        rect = QRect(self._band_origin, local_pos).normalized()
+        self.roster_band.setGeometry(rect)
+        if rect.width() > 3 or rect.height() > 3:
+            self.roster_band.show()
+        for c in self._roster_cards:
+            uid = self._units[c.idx]["unit_id"]
+            inside = c.geometry().intersects(rect)
+            self._set_card_selected(c, inside or uid in self._band_base)
+
+    def _band_end(self):
+        self._band_origin = None
+        self.roster_band.hide()
+
+    def _card_pressed(self, idx, ctrl):
+        card = self._card_by_idx(idx)
+        if card is None:
+            return
+        self._ctrl_press = bool(ctrl)
+        if not ctrl and card.selected and len(self._selected_cards()) > 1:
+            # klik na už označenou skupinu: nechat výběr (na uvolnění přijde nabídka)
+            self._band_origin = None
+            return
+        local = self.roster_host.mapFromGlobal(QCursor.pos())
+        self._band_begin(local, bool(ctrl), card)
+
+    def _card_drag_over(self, gpos):
+        self._band_update(self.roster_host.mapFromGlobal(gpos))
+
+    def _card_released(self, idx, dragged):
+        self._band_end()
+        if getattr(self, "_ctrl_press", False):
+            self._ctrl_press = False
+            return                      # Ctrl+klik jen přepíná výběr
+        if dragged:
+            return                      # tažení = jen výběr, nabídka až na klik
+        self._open_card_menu(idx)
+
+    def _card_context(self, idx):
+        card = self._card_by_idx(idx)
+        if card is not None and not card.selected:
+            self._roster_clear_selection()
+            self._set_card_selected(card, True)
+        self._open_card_menu(idx)
+
+    def _open_card_menu(self, idx):
+        sel = self._selected_cards()
+        if len(sel) > 1:
+            self._multi_menu([c.idx for c in sel])
+        else:
+            self._card_menu(idx)
+
+    def _multi_menu(self, idxs):
+        n = len(idxs)
+        regular = [i for i in idxs if not tables.is_character_unit(self._units[i])]
+        m = QMenu(self)
+        a_heal = m.addAction("✚ " + t("Uzdravit označené (%d)") % n)
+        a_rank = m.addAction("★ " + t("Nastavit hodnost označeným…"))
+        a_max = m.addAction("▲ " + t("Max hodnost označených (%d)") % len(regular))
+        m.addSeparator()
+        a_del = m.addAction("✕ " + t("Odebrat označené (%d)") % len(regular))
+        m.addSeparator()
+        a_clear = m.addAction(t("Zrušit výběr"))
+        for a in (a_rank, a_max, a_del):
+            a.setEnabled(bool(regular))
+        act = self._exec_menu(m)
+        if act is None:
+            return
+        if act == a_clear:
+            self._roster_clear_selection()
+            return
+        changed = 0
+        try:
+            if act == a_heal:
+                for i in idxs:
+                    u = self._units[i]
+                    if u["hp"] and u["hp_max"] and u["hp"].value != u["hp_max"].value:
+                        u["hp"].value = u["hp_max"].value
+                        changed += 1
+            elif act in (a_rank, a_max):
+                val = 9
+                if act == a_rank:
+                    val, ok = QInputDialog.getInt(self, t("Nastavit hodnost"), t("Hodnost (0–9):"), 9, 0, 9)
+                    if not ok:
+                        return
+                for i in regular:
+                    u = self._units[i]
+                    if u["rank"] and u["rank"].value != val:
+                        tables.set_unit_rank(u, val)
+                        changed += 1
+            elif act == a_del:
+                if QMessageBox.question(
+                        self, t("Odebrat jednotku"),
+                        t("Opravdu odebrat %d označených jednotek z armády?\n(Experimentální "
+                          "funkce — měj zálohu savu.)") % len(regular)) != QMessageBox.Yes:
+                    return
+                for i in regular:
+                    tables.remove_unit(self.save_file, self._units[i])
+                    changed += 1
+        except Exception as e:  # noqa: BLE001
+            QMessageBox.critical(self, t("Chyba"), "%s: %s" % (type(e).__name__, e))
+        if changed:
+            self.mark_modified()
+            self._last_key = None
+            self.faction_selected()
+            self._refresh_army_list()
+            self.statusBar().showMessage(t("Upraveno jednotek: %d") % changed)
+
+    def _card_menu(self, idx):
+        if self.save_file is None or idx >= len(self._units):
+            return
+        u = self._units[idx]
+        is_char = tables.is_character_unit(u)
+        m = QMenu(self)
+        a_heal = m.addAction("✚ " + t("Uzdravit"))
+        a_rank = a_max = a_dup = a_del = None
+        if not is_char:
+            a_rank = m.addAction("★ " + t("Nastavit hodnost…"))
+            a_max = m.addAction("▲ " + t("Max hodnost"))
+            a_dup = m.addAction("⧉ " + t("Duplikovat"))
+            m.addSeparator()
+            a_del = m.addAction("✕ " + t("Odebrat"))
+        act = self._exec_menu(m)
+        if act is None:
+            return
+        changed = False
+        try:
+            if act == a_heal:
+                if u["hp"] and u["hp_max"] and u["hp"].value != u["hp_max"].value:
+                    u["hp"].value = u["hp_max"].value
+                    changed = True
+            elif act == a_rank:
+                val, ok = QInputDialog.getInt(self, t("Nastavit hodnost"), t("Hodnost (0–9):"),
+                                              u["rank"].value if u["rank"] else 0, 0, 9)
+                if ok and u["rank"] and u["rank"].value != val:
+                    tables.set_unit_rank(u, val)
+                    changed = True
+            elif act == a_max:
+                if u["rank"] and u["rank"].value != 9:
+                    tables.set_unit_rank(u, 9)
+                    changed = True
+            elif act == a_dup:
+                self._add_units(u["force_id"], u, 1, heal=False, fresh=False)
+                return
+            elif act == a_del:
+                if QMessageBox.question(
+                        self, t("Odebrat jednotku"),
+                        t("Opravdu odebrat jednotku %s z armády?\n(Experimentální "
+                          "funkce — měj zálohu savu.)") % tables.pretty_unit(u["unit_key"])) \
+                        != QMessageBox.Yes:
+                    return
+                tables.remove_unit(self.save_file, u)
+                changed = True
+        except Exception as e:  # noqa: BLE001
+            QMessageBox.critical(self, t("Chyba"), "%s: %s" % (type(e).__name__, e))
+            return
+        if changed:
+            self.mark_modified()
+            self._last_key = None
+            self.faction_selected()
+            self._refresh_army_list()
+
+    def _add_unit_dialog(self, force_id=None):
+        from PySide6.QtWidgets import QDialog, QFormLayout, QSpinBox, QCheckBox
+        if isinstance(force_id, bool) or not isinstance(force_id, int):
+            force_id = None
+        if self.save_file is None or not getattr(self, "_units", None):
+            return
+        counts = {}
+        for u in self._units:
+            counts[u["force_id"]] = counts.get(u["force_id"], 0) + 1
+        armies = sorted(((fid, lbl) for fid, lbl in self._unit_labels.items() if fid in counts),
+                        key=lambda kv: kv[1])
+        templates = {}
+        for u in self._units:
+            if not tables.is_character_unit(u):
+                templates.setdefault(u["unit_key"], u)
+        if not armies or not templates:
+            QMessageBox.information(self, t("Jednotky"),
+                                    t("Frakce nemá žádnou armádu s řadovou jednotkou, "
+                                      "kterou by šlo použít jako vzor."))
+            return
+        # předvolba armády: karta „+" / vybraný řádek / filtr armády
+        pre_fid = force_id
+        row = self.unit_table.currentRow()
+        if pre_fid is None and row >= 0 and self.unit_table.item(row, 0) is not None:
+            tag = self.unit_table.item(row, 0).data(Qt.UserRole + 1)
+            if tag is not None:
+                pre_fid = self._units[tag]["force_id"]
+        if pre_fid is None and self.unit_filter.currentIndex() > 0:
+            pre_fid = next((fid for fid, lbl in armies
+                            if lbl == self.unit_filter.currentText()), None)
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle(t("Přidat jednotku"))
+        form = QFormLayout(dlg)
+        army_cb = QComboBox()
+        army_cb.setIconSize(QSize(22, 22))
+        named = {fid: (label, ckey) for fid, label, ckey
+                 in self._force_entries(kinds=("army", "caravan", "garrison"))}
+        for fid, lbl in armies:
+            label, ckey = named.get(fid, ("%s  (%d/%d)" % (lbl, counts.get(fid, 0), self.ARMY_UNIT_LIMIT), None))
+            icon = self._leader_icon(ckey) if ckey else None
+            if icon is not None:
+                army_cb.addItem(icon, label, fid)
+            else:
+                army_cb.addItem(label, fid)
+        if pre_fid is not None and army_cb.findData(pre_fid) >= 0:
+            army_cb.setCurrentIndex(army_cb.findData(pre_fid))
+        # vzorová jednotka: vyhledávací pole + seznam s kartami (filtr podle názvu i klíče)
+        search = QLineEdit()
+        search.setPlaceholderText(t("Hledat jednotku… (název nebo klíč)"))
+        search.setClearButtonEnabled(True)
+        tmpl_list = QListWidget()
+        tmpl_list.setIconSize(QSize(30, 65))
+        tmpl_list.setMinimumSize(560, 300)
+        tmpl_list.setUniformItemSizes(True)
+        world_cb = QCheckBox(t("Nabídnout i jednotky ostatních frakcí (vzor odkudkoli ze světa)"))
+        own_keys = set(templates)
+        lbl_count = QLabel("")
+        lbl_count.setObjectName("muted")
+
+        def fold(s):
+            import unicodedata
+            return "".join(c for c in unicodedata.normalize("NFKD", str(s).lower())
+                           if not unicodedata.combining(c))
+
+        def fill_templates(*_):
+            cur_it = tmpl_list.currentItem()
+            cur = cur_it.data(Qt.UserRole) if cur_it is not None else None
+            tmpl_list.clear()
+            pool = dict(templates)
+            if world_cb.isChecked():
+                if self._world_templates is None:
+                    QApplication.setOverrideCursor(Qt.WaitCursor)
+                    try:
+                        self._world_templates = tables.world_unit_templates(self.save_file)
+                    finally:
+                        QApplication.restoreOverrideCursor()
+                for k, r in self._world_templates.items():
+                    pool.setdefault(k, r)
+            templates.update(pool)
+            words = fold(search.text()).split()
+            own = sorted(own_keys, key=lambda k: tables.pretty_unit(k).lower())
+            others = sorted((k for k in pool if k not in own_keys),
+                            key=lambda k: tables.pretty_unit(k).lower())
+            shown = 0
+            for group, foreign in ((own, False), (others, True)):
+                for key in group:
+                    name = tables.pretty_unit(key)
+                    hay = fold(name) + " " + fold(key)
+                    if words and not all(w in hay for w in words):
+                        continue
+                    label = "%s\n%s" % (name, key)
+                    if foreign:
+                        label += "   " + t("(jiná frakce)")
+                    pm = self._pixmap_for(key)
+                    it = QListWidgetItem(QIcon(pm), label) if pm is not None else QListWidgetItem(label)
+                    it.setData(Qt.UserRole, key)
+                    tmpl_list.addItem(it)
+                    shown += 1
+                    if key == cur:
+                        tmpl_list.setCurrentItem(it)
+            if tmpl_list.currentItem() is None and tmpl_list.count():
+                tmpl_list.setCurrentRow(0)
+            lbl_count.setText(t("Zobrazeno jednotek: %d z %d") % (shown, len(pool)))
+            update_ok()
+
+        def update_ok(*_):
+            free = max(0, self.ARMY_UNIT_LIMIT - counts.get(army_cb.currentData(), 0))
+            b_ok.setEnabled(free > 0 and tmpl_list.currentItem() is not None)
+        world_cb.toggled.connect(fill_templates)
+        search.textChanged.connect(fill_templates)
+        tmpl_list.currentItemChanged.connect(update_ok)
+        count = QSpinBox()
+        count.setRange(1, self.ARMY_UNIT_LIMIT)
+        heal = QCheckBox(t("Plná síla"))
+        heal.setChecked(True)
+        rank_cb = QComboBox()
+        for r in range(10):
+            rank_cb.addItem("★ %d" % r if r else t("0 (nová jednotka, 0 XP)"), r)
+        rank_cb.addItem(t("jako vzorová jednotka (zkopírovat hodnost i XP)"), -1)
+        hint = QLabel(t("Nová jednotka je kopie vzorové jednotky s novým id. "
+                        "Experimentální funkce — měj zálohu savu.") + " " +
+                      t("Vzorová jednotka musí v savu už někde existovat — jinak hra nemá odkud vzít její data."))
+        hint.setWordWrap(True)
+        hint.setObjectName("muted")
+        form.addRow(t("Armáda:"), army_cb)
+        form.addRow(t("Vzorová jednotka:"), search)
+        form.addRow("", tmpl_list)
+        form.addRow("", lbl_count)
+        form.addRow("", world_cb)
+        form.addRow(t("Počet:"), count)
+        form.addRow(t("Hodnost:"), rank_cb)
+        form.addRow("", heal)
+        form.addRow(hint)
+        btn_row = QHBoxLayout()
+        btn_row.addStretch(1)
+        b_cancel = QPushButton(t("Zrušit"))
+        b_ok = QPushButton(t("Přidat"))
+        b_ok.setProperty("role", "primary")
+        b_ok.setDefault(True)
+        b_cancel.clicked.connect(dlg.reject)
+        b_ok.clicked.connect(dlg.accept)
+        tmpl_list.itemDoubleClicked.connect(lambda *_: b_ok.isEnabled() and dlg.accept())
+        btn_row.addWidget(b_cancel)
+        btn_row.addWidget(b_ok)
+        form.addRow(btn_row)
+
+        def update_limit(*_):
+            free = max(0, self.ARMY_UNIT_LIMIT - counts.get(army_cb.currentData(), 0))
+            count.setMaximum(max(free, 1))
+            count.setEnabled(free > 0)
+            b_ok.setToolTip("" if free else t("Armáda už má %d jednotek, víc hra neumí.")
+                            % self.ARMY_UNIT_LIMIT)
+            update_ok()
+        army_cb.currentIndexChanged.connect(update_limit)
+        fill_templates()
+        update_limit()
+        search.setFocus()
+        if dlg.exec() != QDialog.Accepted or tmpl_list.currentItem() is None:
+            return
+        rank = rank_cb.currentData()
+        self._add_units(army_cb.currentData(), templates[tmpl_list.currentItem().data(Qt.UserRole)],
+                        count.value(), heal.isChecked(), fresh=(rank >= 0),
+                        rank=(rank if rank > 0 else None))
+
+    def _add_units(self, force_id, template_row, count, heal=True, fresh=True, rank=None):
+        added = 0
+        try:
+            for _ in range(count):
+                tables.add_unit(self.save_file, template_row, force_id=force_id,
+                                heal=heal, fresh=fresh, rank=rank)
+                added += 1
+        except Exception as e:  # noqa: BLE001
+            QMessageBox.critical(self, t("Chyba"), "%s: %s" % (type(e).__name__, e))
+        if added:
+            for _ in range(added):
+                self.mark_modified()
+            self._last_key = None
+            self.faction_selected()
+            self.statusBar().showMessage(t("Přidáno jednotek: %d") % added)
+        return added
 
     def _refresh_chars(self):
         if self.save_file is None or not hasattr(self, "_chars"):
@@ -1763,6 +2744,7 @@ class MainWindow(QMainWindow):
         if not path:
             return
         self.progress = QProgressDialog(t("Ukládám (LZMA komprese)…"), "", 0, 0, self)
+        self.progress.setWindowTitle(t("Uložit jako"))
         self.progress.setCancelButton(None)
         self.progress.setWindowModality(Qt.WindowModal)
         self.progress.setMinimumDuration(300)
@@ -1962,6 +2944,7 @@ def _ask_language():
 
 def main():
     app = QApplication(sys.argv)
+    app.setApplicationName("WH3 Save Editor")      # titulek dialogů bez vlastního názvu (jinak "python")
     if "Fusion" in QStyleFactory.keys():
         app.setStyle("Fusion")
     # jazyk + téma musí být vyřešené dřív, než se postaví UI
@@ -1989,6 +2972,7 @@ def main():
         app.setWindowIcon(QIcon(ico))
     w = MainWindow()
     w.show()
+    w._start_pack_warmup()          # ikony karet se připraví na pozadí, záložka Armády pak nekouše
     if len(sys.argv) > 1:
         w.load(sys.argv[1])
     sys.exit(app.exec())

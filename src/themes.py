@@ -72,6 +72,11 @@ QComboBox::drop-down { border: none; width: 22px; }
 QComboBox { combobox-popup: 0; }
 QComboBox QAbstractItemView { background: %(panel)s; border: 1px solid %(border)s;
     color: %(text)s; selection-background-color: %(selBg)s; selection-color: %(selText)s; }
+QMenu { background: %(panel)s; border: 1px solid %(border)s; color: %(text)s; padding: 4px; }
+QMenu::item { padding: 6px 22px 6px 12px; border-radius: 3px; }
+QMenu::item:selected { background: %(selBg)s; color: %(acc)s; }
+QMenu::item:disabled { color: %(faint)s; }
+QMenu::separator { height: 1px; background: %(hair)s; margin: 4px 6px; }
 
 QPushButton { background: %(panel)s; border: 1px solid %(border)s; border-radius: %(r)spx;
     padding: 7px 16px; color: %(text)s; }
@@ -87,10 +92,14 @@ QPushButton[role="seg"] { padding: 5px 14px; }
 QPushButton[role="seg"]:checked { background: %(accGrad)s; color: %(accText)s;
     font-weight: bold; border-color: %(acc)s; }
 
-QTabWidget::pane { border: 1px solid %(border)s; top: -1px; }
-QTabBar::tab { background: %(win)s; color: %(muted)s; padding: 7px 16px; border: 1px solid %(border)s;
-    border-bottom: none; border-top-left-radius: %(r)spx; border-top-right-radius: %(r)spx; }
+QTabWidget::pane { border: none; border-top: 1px solid %(border)s; top: 0px; }
+QTabWidget::tab-bar { left: 0px; }
+QTabBar::tab { background: %(win)s; color: %(muted)s; padding: 7px 16px; margin: 0 2px 0 0;
+    min-height: 16px; border: 1px solid %(border)s; border-bottom: none;
+    border-top-left-radius: %(r)spx; border-top-right-radius: %(r)spx; }
 QTabBar::tab:selected { background: %(accGrad)s; color: %(accText)s; font-weight: bold; }
+QTabBar::tab:!selected { margin-top: 0; }
+QTabBar::tab:hover:!selected { color: %(text)s; border-color: %(acc)s; }
 
 QFrame#panel { border: 1px solid %(border)s; border-radius: %(r)spx; background: %(panel)s; }
 QWidget#sectionHead { background: %(secBandBg)s; border-bottom: 1px solid %(secBandLine)s;
