@@ -9,6 +9,7 @@
   "Informace o savu": "Save info",
   "název zobrazený ve hře": "name shown in game",
   "Název savu:": "Save name:",
+  "Převod selhal bez chybové zprávy.": "Conversion failed without an error message.",
   "Kampaň:": "Campaign:",
   "Hráči:": "Players:",
   "Verze hry:": "Game version:",
@@ -138,5 +139,10 @@
   "EDITOR SAVU": "SAVE EDITOR",
   "dekomprimováno": "decompressed",
   "Hlavní": "Main",
-  "Obsidian & Amber": "Obsidian & Amber"
+  "Obsidian & Amber": "Obsidian & Amber",
+  "Historie verzí": "Changelog",
+  "Dostupná aktualizace": "Available update",
+  "Changelog není k dispozici.": "Changelog not available.",
+  "Všechny verze na GitHubu": "All releases on GitHub",
+  "Zavřít": "Close"
 }

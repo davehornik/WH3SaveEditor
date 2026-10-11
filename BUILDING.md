@@ -48,6 +48,7 @@ python gen_version_info.py
 pyinstaller --noconfirm --clean --onefile --windowed --name WH3SaveEditor ^
   --version-file version_info.txt ^
   --add-data "lang;lang" --add-data "fonts;fonts" --add-data "icon.ico;." ^
+  --add-data "../CHANGELOG.md;." ^
   --hidden-import convert_mp_sp --hidden-import zstandard ^
   --icon icon.ico gui.py
 ```

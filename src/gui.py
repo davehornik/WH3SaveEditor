@@ -23,7 +23,7 @@ import locdb
 import themes
 from i18n import t
 
-APP_VERSION = "1.2.3"
+APP_VERSION = "1.2.4"
 
 # aktivní téma (slovník tokenů) — nastavuje set_theme(); výchozí dle themes.DEFAULT
 THEME = themes.theme(themes.DEFAULT)
@@ -304,7 +304,7 @@ def _ver_key(s):
 
 class UpdateCheck(QThread):
     """Tichá kontrola nové verze na GitHubu (při startu, na pozadí)."""
-    found = Signal(str)     # tag nové verze
+    found = Signal(str, str)     # tag + release notes nové verze
 
     def run(self):
         try:
@@ -315,9 +315,10 @@ class UpdateCheck(QThread):
                 headers={"User-Agent": "WH3SaveEditor/" + APP_VERSION,
                          "Accept": "application/vnd.github+json"})
             with urlopen(req, timeout=5) as r:
-                tag = _json.load(r).get("tag_name", "")
+                rel = _json.load(r)
+            tag = rel.get("tag_name", "")
             if tag and _ver_key(tag) > _ver_key(APP_VERSION):
-                self.found.emit(tag)
+                self.found.emit(tag, rel.get("body") or "")
         except Exception:   # noqa: BLE001 — offline/rate-limit = žádná zpráva
             pass
 
@@ -505,8 +506,14 @@ class MainWindow(QMainWindow):
         self.micro.setContentsMargins(16, 0, 0, 0)
         sv.addWidget(self.micro)
         sv.addWidget(self.sidebar, 1)
+        self.btn_changelog = QPushButton("☰  " + t("Historie verzí"))
+        self.btn_changelog.setObjectName("sidebarBtn")
+        self.btn_changelog.setCheckable(True)
+        self.btn_changelog.setCursor(Qt.PointingHandCursor)
+        self.btn_changelog.clicked.connect(self.open_changelog)
+        sv.addWidget(self.btn_changelog)
         self.stack = QStackedWidget()
-        self.sidebar.currentRowChanged.connect(self.stack.setCurrentIndex)
+        self.sidebar.currentRowChanged.connect(self._nav_changed)
 
         self.stack.addWidget(self._page_overview())
         self.stack.addWidget(self._page_tables())
@@ -515,6 +522,7 @@ class MainWindow(QMainWindow):
                                                t("Regiony, budovy a garnizony – v přípravě.")))
         self.stack.addWidget(self._page_raw())
         self.stack.addWidget(self._page_tools())
+        self.CHANGELOG_PAGE = self.stack.addWidget(self._page_changelog())
 
         central = QWidget()
         lay = QHBoxLayout(central)
@@ -540,6 +548,7 @@ class MainWindow(QMainWindow):
         self._loading = False
         self._player_factions = []
         self._edit_count = 0
+        self._update_tag, self._update_body = None, ""
         self.apply_theme(self.cfg["ui"].get("theme", themes.DEFAULT),
                          self.cfg["ui"].get("density", "compact"),
                          startup=True)
@@ -555,8 +564,9 @@ class MainWindow(QMainWindow):
         self._upd.found.connect(self._update_available)
         self._upd.start()
 
-    def _update_available(self, tag):
+    def _update_available(self, tag, body=""):
         self._update_tag = tag
+        self._update_body = body
         self.update_lbl.setText(
             '<a style="color:%s;font-weight:bold;text-decoration:none" '
             'href="https://github.com/%s/releases/latest">▲ %s</a>&nbsp; '
@@ -621,6 +631,8 @@ class MainWindow(QMainWindow):
         if self.save_file is not None:
             self._set_overview_sub()
             self._set_mods_label()
+        if getattr(self, "stack", None) is not None                 and self.stack.currentIndex() == self.CHANGELOG_PAGE:
+            self._fill_changelog()
 
     # -- nastavení složek ----------------------------------------------------
 
@@ -1187,7 +1199,10 @@ class MainWindow(QMainWindow):
                     conv.convert(path, keep, out, out_name)
                     w_self.done.emit(out, "")
                 except Exception as e:  # noqa: BLE001
-                    w_self.done.emit("", str(e))
+                    # některé výjimky mají prázdnou zprávu (StopIteration, AttributeError())
+                    # -> bez názvu typu by se chyba tvářila jako úspěch (GitHub issue #2)
+                    w_self.done.emit("", "%s: %s" % (type(e).__name__, e) if str(e)
+                                     else type(e).__name__)
 
         self.worker = W()
         self.worker.done.connect(self._mp_to_sp_done)
@@ -1196,8 +1211,8 @@ class MainWindow(QMainWindow):
     def _mp_to_sp_done(self, out, err):
         self.progress.close()
         self.setEnabled(True)
-        if err:
-            QMessageBox.critical(self, t("Chyba"), err)
+        if err or not out:
+            QMessageBox.critical(self, t("Chyba"), err or t("Převod selhal bez chybové zprávy."))
             return
         self._refresh_save_list()
         QMessageBox.information(self, t("Nástroje"),
@@ -1683,6 +1698,53 @@ class MainWindow(QMainWindow):
 
     def open_settings(self):
         SettingsDialog(self).exec()
+
+    def _nav_changed(self, row):
+        if row < 0:
+            return                      # odznačení sidebaru (stránka Changelog)
+        self.btn_changelog.setChecked(False)
+        self.stack.setCurrentIndex(row)
+
+    def open_changelog(self):
+        self._fill_changelog()
+        self.sidebar.setCurrentRow(-1)
+        self.btn_changelog.setChecked(True)
+        self.stack.setCurrentIndex(self.CHANGELOG_PAGE)
+
+    def _page_changelog(self):
+        from PySide6.QtWidgets import QTextBrowser
+        w = QWidget()
+        v = QVBoxLayout(w)
+        v.setContentsMargins(28, 22, 28, 22)
+        title = QLabel(t("Historie verzí"))
+        title.setObjectName("title")
+        v.addWidget(title)
+        self.changelog_view = QTextBrowser()
+        self.changelog_view.setOpenExternalLinks(True)
+        v.addWidget(self.changelog_view, 1)
+        self.changelog_link = QLabel()
+        self.changelog_link.setTextFormat(Qt.RichText)
+        self.changelog_link.setOpenExternalLinks(True)
+        v.addWidget(self.changelog_link)
+        return w
+
+    def _fill_changelog(self):
+        """Přibalený CHANGELOG.md + (je-li k dispozici) notes novější verze."""
+        md = ""
+        if self._update_tag and self._update_body:
+            md += ("**▲ %s — %s**\n\n%s\n\n---\n\n"
+                   % (t("Dostupná aktualizace"), self._update_tag,
+                      self._update_body))
+        try:
+            with open(os.path.join(i18n.res_dir(), "CHANGELOG.md"),
+                      encoding="utf-8") as f:
+                md += f.read()
+        except OSError:
+            md += t("Changelog není k dispozici.")
+        self.changelog_view.setMarkdown(md)
+        self.changelog_link.setText(
+            '<a style="color:%s" href="https://github.com/%s/releases">%s</a>'
+            % (THEME["link"], GITHUB_REPO, t("Všechny verze na GitHubu")))
 
     def mark_modified(self):
         self.setWindowModified(True)

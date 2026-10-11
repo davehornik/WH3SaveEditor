@@ -45,6 +45,13 @@ QListWidget#sidebar::item { padding: 10px 14px; margin: 1px 8px; border-radius: 
     color: %(muted)s; border-left: 3px solid transparent; }
 QListWidget#sidebar::item:hover:!selected { background: %(hovRow)s; color: %(text)s; }
 /* ::item:selected je per-téma v extra_qss */
+QPushButton#sidebarBtn { background: transparent; border: none; border-radius: 0;
+    border-top: 1px solid %(border)s; color: %(muted)s; text-align: left;
+    padding: 11px 22px; }
+QPushButton#sidebarBtn:hover { color: %(text)s; background: %(hovRow)s; }
+QPushButton#sidebarBtn:checked { color: %(acc)s; font-weight: bold; background: %(hovRow)s; }
+QTextBrowser { background: %(panel)s; color: %(text)s; border: 1px solid %(border)s;
+    border-radius: %(r)spx; padding: 10px; }
 
 QTableWidget, QTreeView { background: %(panel)s; alternate-background-color: %(panel)s;
     gridline-color: transparent; border: 1px solid %(border)s; color: %(text)s; }
@@ -185,6 +192,9 @@ QListWidget#sidebar::item { color: #a89d87; margin: 1px 0 1px 6px; border-left: 
     border-top-left-radius: 4px; border-bottom-left-radius: 4px; }
 QListWidget#sidebar::item:hover:!selected { background: #2e2a25; color: #d9d0bd; }
 QListWidget#sidebar::item:selected { background: #e8dcc2; color: #2c2418; font-weight: bold; }
+QPushButton#sidebarBtn { color: #a89d87; border-top-color: #4a4238; }
+QPushButton#sidebarBtn:hover { color: #d9d0bd; background: #2e2a25; }
+QPushButton#sidebarBtn:checked { color: #e8dcc2; background: #2e2a25; }
 QHeaderView::section { border-bottom: 2px solid #b9a888; }
 """),
 

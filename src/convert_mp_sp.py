@@ -128,6 +128,42 @@ def esf_file_bytes(esf, body):
     return bytes(out)
 
 
+# stav hráče u frakce — enum ve hře (Warhammer3.exe): FULL_HUMAN=0, IDLE_HUMAN=1, NON_HUMAN=2
+HUMAN_STATES = ("FULL_HUMAN", "IDLE_HUMAN", "NON_HUMAN")
+
+
+def _u32_array_items(arr):
+    """Pole u32 id (HUMAN_FACTIONS, TURN_GROUP): hra ho ukládá nejmenším kódováním, do kterého se
+    vejdou všechny prvky — 0x16 = 1 B, 0x17 = 2 B LE, 0x18 = 3 B BE, 0x08 = raw 4 B LE
+    (ověřeno v optimizeru Warhammer3.exe). "arr16" vs "arr17" tedy není struktura, jen hodnoty."""
+    c, d = arr.base_code, bytes(arr.raw)
+    if c == 0x16:
+        return list(d)
+    if c == 0x17:
+        return list(struct.unpack("<%dH" % (len(d) // 2), d))
+    if c == 0x18:
+        return [(d[i] << 16) | (d[i + 1] << 8) | d[i + 2] for i in range(0, len(d) - 2, 3)]
+    if c == 0x08:
+        return list(struct.unpack("<%dI" % (len(d) // 4), d))
+    raise ValueError("unexpected faction-id array type 0x%02X" % c)
+
+
+def _set_u32_array(arr, ids):
+    """Přepíše pole u32 id a zvolí typ pole stejně jako hra (viz _u32_array_items)."""
+    m = max(ids, default=0)
+    if m < 0x100:
+        code, payload = 0x16, bytes(ids)
+    elif m < 0x10000:
+        code, payload = 0x17, b"".join(struct.pack("<H", v) for v in ids)
+    elif m < 0x1000000:
+        code, payload = 0x18, b"".join(bytes([(v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF]) for v in ids)
+    else:
+        code, payload = 0x08, b"".join(struct.pack("<I", v) for v in ids)
+    arr.code = code | 0x40
+    arr._new = payload
+    arr.mark_dirty()
+
+
 def convert(mp_path, keep, out_path, save_name):
     s = SaveFile(mp_path)
     drop_key = None
@@ -145,10 +181,19 @@ def convert(mp_path, keep, out_path, save_name):
         # přímé dítě FACTION — s jen jedním přepnutým zůstane frakce
         # v "třetím stavu" a hra se zasekne při přechodu kola
         # (GitHub issue #1, fix od LuxInTenebr1s)
-        for node in (rec.child("CAMPAIGN_PLAYER_SETUP"), rec):
-            human_node = next(c for c in node.children
-                              if isinstance(c, Value) and c.type_name == "ascii"
-                              and str(c.value) in ("FULL_HUMAN", "NON_HUMAN"))
+        # Enum ve hře (ověřeno v Warhammer3.exe): FULL_HUMAN=0, IDLE_HUMAN=1, NON_HUMAN=2.
+        # IDLE_HUMAN = lidská frakce bez připojeného klienta (hráč odešel) — dřív tu chyběl,
+        # next() pak vyhodil StopIteration s prázdnou zprávou a GUI to ukázalo jako
+        # "Hotovo" s prázdnou cestou (GitHub issue #2).
+        for label, node in (("CAMPAIGN_PLAYER_SETUP", rec.child("CAMPAIGN_PLAYER_SETUP")),
+                            ("FACTION", rec)):
+            human_node = None if node is None else next(
+                (c for c in node.children
+                 if isinstance(c, Value) and c.type_name == "ascii"
+                 and str(c.value) in HUMAN_STATES), None)
+            if human_node is None:
+                raise RuntimeError("%s: human/AI flag (FULL_HUMAN / IDLE_HUMAN / NON_HUMAN) "
+                                   "not found in %s" % (dk, label))
             human_node.value = "NON_HUMAN"
 
     # CAMPAIGN_SETUP_LOCAL: faction of the LOCAL player = the kept one
@@ -180,35 +225,39 @@ def convert(mp_path, keep, out_path, save_name):
     fac_ids = {f["key"]: f["id"] for f in tables.factions(s)}
     keep_id = fac_ids[keep_key]
     drop_ids = [fac_ids[k] for k in drop_keys]
-    assert keep_id < 256 and all(d < 65536 for d in drop_ids)
     model = env.child("CAMPAIGN_MODEL")
     hf_arr = next(c for c in model.child("HUMAN_FACTIONS").children
                   if isinstance(c, ValueArray))
-    hf_arr._new = bytes([keep_id])          # arr16: 1 B na frakci
-    hf_arr.mark_dirty()
+    _set_u32_array(hf_arr, [keep_id])
+    # TURN_CONTROL = pole TURN_GROUP + u32 index aktuální skupiny; skupina = [pole id A, pole id B,
+    # leader u32, byte 0x23, (pole id C)] (ověřeno v Warhammer3.exe). Lidskou skupinu poznáme podle
+    # obsahu (obsahuje ponechanou frakci), ne podle typu pole — ten závisí jen na velikosti id.
     tc = model.child("WORLD").child("TURN_CONTROL")
     tg_blk = next(c for c in tc.children if isinstance(c, RecordBlock))
+    groups = []
     for e in tg_blk.entries:
         arrs = [c for c in e.children if isinstance(c, ValueArray)]
-        if not arrs:
-            continue
-        head = arrs[0]
-        if head.base_code == 0x16:          # lidská skupina (arr16)
-            head._new = bytes([keep_id])
-            head.mark_dirty()
-            for c in e.children:            # leader id + unk23 jako v SP
-                if isinstance(c, Value) and c.type_name == "u32":
-                    c.value = keep_id
-                    break
-            for c in e.children:
-                if isinstance(c, Value) and c.type_name == "unk23" and c.value:
-                    c.value = 0
-                    break
-        elif head.base_code == 0x17:        # AI skupina (arr17, u16 LE)
-            payload = s.inner.data[head.cstart:head.cend]
-            head._new = payload + b"".join(struct.pack("<H", d)
-                                           for d in drop_ids)
-            head.mark_dirty()
+        if arrs:
+            groups.append((e, arrs[0], _u32_array_items(arrs[0])))
+    human = [g for g in groups if keep_id in g[2]]
+    if len(human) != 1:
+        raise RuntimeError("TURN_CONTROL: expected exactly one turn group containing faction id %d, "
+                           "found %d (groups: %s)" % (keep_id, len(human), [g[2] for g in groups]))
+    e, head, _ = human[0]
+    _set_u32_array(head, [keep_id])
+    for c in e.children:                    # leader id + unk23 jako v SP
+        if isinstance(c, Value) and c.type_name == "u32":
+            c.value = keep_id
+            break
+    for c in e.children:
+        if isinstance(c, Value) and c.type_name == "unk23" and c.value:
+            c.value = 0
+            break
+    others = [g for g in groups if g is not human[0]]
+    if not others:
+        raise RuntimeError("TURN_CONTROL: no AI turn group found to move %s into" % drop_ids)
+    e2, head2, ids2 = max(others, key=lambda g: len(g[2]))     # AI skupina = ta největší
+    _set_u32_array(head2, ids2 + [d for d in drop_ids if d not in ids2])
 
     # ENV-level GAME_PERSISTENT_SESSION_ID: keep only the owner's identity
     u64_keep = player_block(hdr_in, keep)[4]
@@ -279,9 +328,9 @@ if __name__ == "__main__":
         v.outer.root.name, v.is_multiplayer, hdr.children[0].value,
         env.child("CAMPAIGN_SETUP_LOCAL").children[0].value))
     facs = {f["key"]: f["record"] for f in tables.factions(v)}
-    get = lambda r: next(str(c.value) for c in r.children
-                         if isinstance(c, Value) and c.type_name == "ascii"
-                         and str(c.value) in ("FULL_HUMAN", "NON_HUMAN"))
+    get = lambda r: next((str(c.value) for c in r.children
+                          if isinstance(c, Value) and c.type_name == "ascii"
+                          and str(c.value) in HUMAN_STATES), "?")
     for key in [keep_key] + drop_keys:
         print("verify: %s = %s" % (
             key, get(facs[key].child("CAMPAIGN_PLAYER_SETUP"))))

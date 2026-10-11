@@ -285,9 +285,10 @@ class Value(Node):
         if c == I32_16BIT:
             return struct.unpack_from("<h", d, p)[0]
         if c == I32_24BIT:
-            # big-endian sign-magnitude: high bit = sign, 23 bits magnitude
-            v = ((d[p] & 0x7F) << 16) | (d[p + 1] << 8) | d[p + 2]
-            return -v if d[p] & 0x80 else v
+            # big-endian 24bit DVOJKOVÝ DOPLNĚK (ověřeno v Warhammer3.exe, FUN_14141e2e0:
+            # hodnota = mag - 0x800000 při nastaveném horním bitu), tj. -1 = FF FF FF
+            u = (d[p] << 16) | (d[p + 1] << 8) | d[p + 2]
+            return u - 0x1000000 if u & 0x800000 else u
         if c == F32_ZERO:
             return 0.0
         if c == UNK_26:
@@ -344,7 +345,9 @@ class ValueArray(Node):
                 out = list(struct.unpack("<%dh" % (len(d) // 2), d))
             elif c in (U16, U32_16BIT):
                 out = list(struct.unpack("<%dH" % (len(d) // 2), d))
-            elif c in (I32, I32_BYTE):
+            elif c == I32_BYTE:
+                out = list(struct.unpack("<%db" % len(d), d))
+            elif c == I32:
                 out = list(struct.unpack("<%di" % (len(d) // 4), d))
             elif c in (U32, U32_ZERO, U32_ONE):
                 out = list(struct.unpack("<%dI" % (len(d) // 4), d))
@@ -356,9 +359,9 @@ class ValueArray(Node):
                 out = [(d[i] << 16) | (d[i + 1] << 8) | d[i + 2]
                        for i in range(0, len(d) - 2, 3)]
             elif c == I32_24BIT:
-                out = [(-(((d[i] & 0x7F) << 16) | (d[i + 1] << 8) | d[i + 2])
-                        if d[i] & 0x80 else
-                        ((d[i] & 0x7F) << 16) | (d[i + 1] << 8) | d[i + 2])
+                # big-endian dvojkový doplněk (stejně jako u skalární hodnoty)
+                out = [((d[i] << 16) | (d[i + 1] << 8) | d[i + 2]) - 0x1000000
+                       if d[i] & 0x80 else (d[i] << 16) | (d[i + 1] << 8) | d[i + 2]
                        for i in range(0, len(d) - 2, 3)]
             elif c in (F32, F32_ZERO):
                 out = list(struct.unpack("<%df" % (len(d) // 4), d))
@@ -501,21 +504,18 @@ class EsfFile:
                 return bytes([U32_BYTE, v])
             return bytes([U32_ONE if v == 1 else U32_ZERO])
         if tn == "i32":
-            # mirrors EditSF's OptimizedIntNode; 24-bit is BIG-endian
-            # sign-magnitude (high bit = sign, 23 bits = abs value)
+            # prahy a kódování podle optimizeru hry (Warhammer3.exe FUN_14142af30):
+            # 0 -> I32_ZERO; i8 -> 1 B; i16 -> 2 B LE; i24 -> 3 B BIG-endian dvojkový doplněk; jinak raw
             if v == 0:
                 return bytes([I32_ZERO])
-            if v == -0x80000000:
-                return bytes([I32]) + struct.pack("<i", v)
-            a = abs(v)
-            if a & 0x7F800000:
-                return bytes([I32]) + struct.pack("<i", v)
-            if a & 0x7F8000:
-                u = a | (0x800000 if v < 0 else 0)
-                return bytes([I32_24BIT, (u >> 16) & 0xFF, (u >> 8) & 0xFF, u & 0xFF])
-            if a & 0x7F80:
+            if -0x80 <= v <= 0x7F:
+                return bytes([I32_BYTE]) + struct.pack("<b", v)
+            if -0x8000 <= v <= 0x7FFF:
                 return bytes([I32_16BIT]) + struct.pack("<h", v)
-            return bytes([I32_BYTE]) + struct.pack("<b", v)
+            if -0x800000 <= v <= 0x7FFFFF:
+                u = v & 0xFFFFFF
+                return bytes([I32_24BIT, (u >> 16) & 0xFF, (u >> 8) & 0xFF, u & 0xFF])
+            return bytes([I32]) + struct.pack("<i", v)
         if tn == "f32":
             if v == 0.0:
                 return bytes([F32_ZERO])
