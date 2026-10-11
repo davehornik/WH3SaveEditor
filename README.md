@@ -60,6 +60,7 @@ The complete source is published in this repo for transparency and security revi
 - **[SaveParser](https://sourceforge.net/projects/saveparser/)** by [RoninX](https://sourceforge.net/u/roninx2807/profile/) — the original savegame editor for older Total War titles that inspired this tool (WH3 was never supported there)
 - **[EditSF fork by xADDBx](https://github.com/xADDBx/EditSF)** — first public editor supporting the WH3 `ABCB` codec
 - **[RPFM](https://github.com/Frodo45127/rpfm)** by Frodo45127 — reference implementation of the ESF format
+- **[REA — Reverse Engineer Anything](https://github.com/morluto/rea)** by morluto, on top of **[Ghidra](https://ghidra-sre.org/)** — the reverse-engineering toolchain used from v1.2.4 on to read the game's own save (de)serializers: the `IDLE_HUMAN` player state, the two's-complement integer encoding, the unit-id counter and the campaign AI's unit mirror that makes *Add unit* possible all come from decompiling `Warhammer3.exe` this way
 - Thanks to the Total War modding community for keeping the format knowledge alive
 
   
@@ -69,7 +70,9 @@ The complete source is published in this repo for transparency and security revi
 > Plans and ideas for future versions. No promises, no dates — this is a hobby project. 🙂
 > Have a feature request? Open an issue!
 
-## Next up (v1.3)
+## Next up (v1.4)
+
+- [ ] **Units from the game database** — add units your faction can recruit even when nobody in the world fields them yet (today's templates are units that already exist somewhere in the save)
 
 - [ ] **Player roster editing for multiplayer saves** — add a player to a running co-op campaign, let one drop out and return later, or turn a solo campaign into a co-op one (the most requested feature so far)
 - [ ] **Faction resources** — edit pooled resources such as Blood Kisses, schematics, supplies etc.
